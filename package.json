@@ -1,0 +1,25 @@
+{
+  "name": "touch-fc",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/alkalagan-commits/touch-fc.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/alkalagan-commits/touch-fc/issues"
+  },
+  "homepage": "https://github.com/alkalagan-commits/touch-fc#readme",
+  "devDependencies": {
+    "html-minifier-terser": "^7.2.0",
+    "javascript-obfuscator": "^5.9.0",
+    "terser": "^5.51.2"
+  }
+}
