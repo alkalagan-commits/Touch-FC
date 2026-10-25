@@ -811,6 +811,13 @@ function afterCupMatch(){
   while(cup.out&&cup.stage!=='done')playRound(null); // on va au bout pour connaître le champion
   saveCup();mode='cup-hub';showHub();
 }
+function simGroups(){ // simule toutes les journées restantes de la phase de groupes, ton match compris (selon l'Elo)
+  const all=[];
+  while(cup.stage==='groups')all.push(...playRound(null).res);
+  cup.last=all;cup.lastLabel='Phase de groupes';
+  while(cup.out&&cup.stage!=='done')playRound(null);
+  saveCup();mode='cup-hub';showHub();
+}
 function startCupMatch(){
   const me=cup.me,op=nextOpp(),A=T[me],B=T[op];
   setTeams(me,op);
@@ -1112,16 +1119,16 @@ function showHub(){
   }else{
     const op=nextOpp(),st=cup.stage==='groups'?(cup.md===0?`Tirage au sort · groupe ${GL[groupOf(me)]}`:`Phase de groupes · journée ${cup.md+1}/3`):STAGE_NAME[cup.stage];
     h+=`<div class="eyebrow">${st}</div>
-      <div class="fixture"><div class="tm"><span class="fl">${T[me][1]}</span>${T[me][0]}<span class="note">Elo ${elo(me)}</span></div><span class="vs">contre</span><div class="tm"><span class="fl">${T[op][1]}</span>${T[op][0]}<span class="note">Elo ${elo(op)}</span></div></div>
-      <button class="big" data-act="play">Jouer le match</button>
+      <div class="fixture"><div class="tm"><span class="fl">${T[me][1]}</span>${T[me][0]}</div><span class="vs">contre</span><div class="tm"><span class="fl">${T[op][1]}</span>${T[op][0]}</div></div>
+      <button class="big" data-act="play">Jouer le match</button>${cup.stage==='groups'?'<button class="alt" data-act="simgroups">Simuler la phase de groupes</button>':''}
       <p class="note">Pays hôte : ${tn(cup.host)}${cup.host===me?' (bonus du public : +100 Elo)':''}</p>
       <p class="note">Deux mi-temps de 2 min, changement de côté à la pause. 10 s par pichenette.${cup.stage!=='groups'?' En cas d’égalité : prolongation au but en or.':''}</p>`;
   }
   if(cup.last.length){
     const mineFirst=cup.last.slice().sort((x,y)=>((y.a===me||y.b===me)-(x.a===me||x.b===me)));
-    h+=`<h2>Résultats · ${cup.lastLabel}</h2>`+resultRows(cup.stage==='groups'||cup.lastLabel.startsWith('Journée')?mineFirst.slice(0,hubView==='all'?24:6):mineFirst);
+    h+=`<h2>Résultats · ${cup.lastLabel}</h2>`+resultRows(cup.stage==='groups'||cup.lastLabel.startsWith('Journée')||cup.lastLabel==='Phase de groupes'?mineFirst.slice(0,hubView==='all'?24:6):mineFirst);
   }
-  if(cup.stage==='groups'||cup.lastLabel==='Journée 3'){
+  if(cup.stage==='groups'||cup.lastLabel==='Journée 3'||cup.lastLabel==='Phase de groupes'){
     if(hubView==='all'){for(let g=0;g<12;g++)h+=groupTable(g)}
     else h+=groupTable(groupOf(me));
     h+=`<button class="small" data-act="view">${hubView==='all'?'Mon groupe seulement':'Tous les groupes'}</button>`;
@@ -1151,6 +1158,7 @@ card.addEventListener('click',e=>{
   else if(a==='pick')newCup(+b.dataset.t);
   else if(a==='hub')showHub();
   else if(a==='play')startCupMatch();
+  else if(a==='simgroups')simGroups();
   else if(a==='view'){hubView=hubView==='all'?'mine':'all';showHub()}
   else if(a==='newcup'){cup=null;saveCup();showPicker()}
   else if(a==='cl'){paused=null;cl&&cl.stage!=='done'&&!cl.out?(mode='cl-hub',showClHub()):clPicker()}
