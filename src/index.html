@@ -109,6 +109,16 @@ button:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
 .banner{position:absolute;left:0;right:0;top:40%;text-align:center;font-family:var(--display);font-weight:800;font-size:60px;line-height:1;color:var(--brass);
   text-shadow:0 3px 0 #000;pointer-events:none;padding:0 12px}
 .banner small{display:block;font-size:22px;color:var(--chalk);letter-spacing:.06em;margin-top:6px}
+details.br{text-align:left;border-top:1px solid #22392b}
+details.br summary{list-style:none;cursor:pointer;display:flex;justify-content:space-between;align-items:center;padding:9px 2px;font-family:var(--display);font-weight:600;font-size:13px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted)}
+details.br summary::-webkit-details-marker{display:none}
+details.br summary::after{content:'+';font-size:18px;color:var(--brass)}
+details.br[open] summary::after{content:'–'}
+.res div.ch .w{color:var(--brass)}
+.res .w{color:var(--chalk);font-weight:600}
+.res .lo{opacity:.55}
+.path{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px;font-size:13px;line-height:1.5;color:var(--muted);text-align:left}
+.path b{color:var(--chalk);font-weight:600}
 @media (prefers-reduced-motion:reduce){*{scroll-behavior:auto}}
 </style>
 
@@ -783,6 +793,7 @@ function playRound(mine){
     res.push(r);winners.push(r.ga>r.gb?a:b);
     const w=r.ga>r.gb?a:b;cup.boost=cup.boost||{};cup.boost[w]=(cup.boost[w]||0)+BOOST;
   }
+  cup.hist=cup.hist||{};cup.hist[st]=res;
   if(!cup.out&&cup.ko.some(p=>p.includes(me))&&!winners.includes(me))cup.out=st;
   if(st==='final'){cup.champ=winners[0];cup.stage='done'}
   else{cup.ko=[];for(let i=0;i<winners.length;i+=2)cup.ko.push([winners[i],winners[i+1]]);cup.stage=STAGES[STAGES.indexOf(st)+1]}
@@ -881,6 +892,7 @@ function clPlayLeg(mine){ // une manche à élimination : aller, puis retour (ou
     res.push({a,b,ga,gb,ap,agg:st!=='final'?[f[0]+ga,f[1]+gb]:null});
     winners.push(f[0]+ga>f[1]+gb?a:b);
   });
+  cl.hist=cl.hist||{};cl.hist[st]=res;
   if(!cl.out&&cl.ko.some(p=>p.includes(me))&&!winners.includes(me))cl.out=st;
   const label=CL_NAME[st]+(st!=='final'?' · retour':'');
   cl.first=null;cl.leg=1;
@@ -947,7 +959,7 @@ function clResRows(list){
 function showClHub(){
   phase='menu';const me=cl.me;let h='';
   if(cl.stage==='done'&&cl.champ===me)h+=`<div class="trophy">🏆</div><div class="eyebrow">CHAMP LEAGUE</div><h1>Champions <span>d’Europe</span></h1><p>${ctn(me)} soulève la coupe aux grandes oreilles.</p>`;
-  else if(cl.out)h+=`<div class="eyebrow">${ctn(me)}</div><h1>Éliminés <span>${CL_ELIM[cl.out]}</span></h1><p>Le vainqueur est <b style="color:var(--chalk)">${ctn(cl.champ)}</b>.</p>`;
+  else if(cl.out)h+=`<div class="eyebrow">${ctn(me)}</div><h1>Éliminés <span>${CL_ELIM[cl.out]}</span></h1><p>Fais défiler pour suivre la suite de la compétition jusqu’à la finale.</p>`;
   else{
     const op=clNext(),lg=cl.stage==='league';
     const st=lg?`Phase de ligue · journée ${cl.md+1}/8`:CL_NAME[cl.stage]+(cl.stage!=='final'?(cl.leg===1?' · aller':' · retour'):'');
@@ -957,7 +969,8 @@ function showClHub(){
       <button class="big" data-act="clplay">Jouer le match</button>${agg}
       <p class="note">Deux mi-temps de 1 min 30 (45´ affichées), changement de côté à la pause.${cl.stage==='final'?' Finale sur un match : en cas d’égalité, but en or.':''}</p>`;
   }
-  if(cl.last.length){const mf=cl.last.slice().sort((x,y)=>((y.a===me||y.b===me)-(x.a===me||x.b===me)));
+  if(cl.stage==='done')h+=bracketHtml(cl.hist,CL_STAGES,CL_NAME,me,cl.champ,(t,side)=>side?`${crest(t)} ${T[t][0]}`:`${T[t][0]} ${crest(t)}`);
+  else if(cl.last.length){const mf=cl.last.slice().sort((x,y)=>((y.a===me||y.b===me)-(x.a===me||x.b===me)));
     h+=`<h2>Résultats · ${cl.lastLabel}</h2>`+clResRows(cl.lastLabel.startsWith('Journée')&&clView!=='all'?mf.slice(0,6):mf)}
   if(cl.simLeague&&cl.tableNext){const pos=(cl.final8||[]).indexOf(me)+1;h+=`<p class="note">Phase de ligue simulée : ${ctn(me)} termine ${pos}${pos===1?'er':'e'}.${cl.skipPo?' Dans le top 8 : directement en huitièmes, les barrages se sont joués sans toi.':' Place aux barrages.'}</p>`}
   else if(cl.skipPo&&cl.tableNext)h+='<p class="note">Dans le top 8 : tu passes directement en huitièmes, les barrages se sont joués sans toi.</p>';
@@ -1084,13 +1097,25 @@ async function showReveal(){
 function resultRows(list){
   return '<div class="res">'+list.map(r=>`<div class="${r.a===cup.me||r.b===cup.me?'me':''}"><span class="l">${T[r.a][0]} ${T[r.a][1]}</span><span class="s">${r.ga}–${r.gb}${r.ap?'<small>but en or</small>':''}</span><span class="r">${T[r.b][1]} ${T[r.b][0]}</span></div>`).join('')+'</div>';
 }
+/* Tableau de la phase finale, affiché une fois la compétition terminée : tous les tours dans l'ordre, la finale en bas */
+function bracketHtml(hist,stages,names,me,champ,nm){
+  if(!hist||champ==null)return '';
+  const won=r=>{const x=r.agg?r.agg[0]:r.ga,y=r.agg?r.agg[1]:r.gb;return x>y?r.a:r.b};
+  const row=r=>{const w=won(r),sc=r.agg?`${r.ga}–${r.gb}<small>cumul ${r.agg[0]}–${r.agg[1]}${r.ap?' · but en or':''}</small>`:`${r.ga}–${r.gb}${r.ap?'<small>but en or</small>':''}`;
+    const cls=r.a===me||r.b===me?'me':'';
+    return `<div class="${cls}"><span class="l ${w===r.a?'w':'lo'}">${nm(r.a,0)}</span><span class="s">${sc}</span><span class="r ${w===r.b?'w':'lo'}">${nm(r.b,1)}</span></div>`};
+  const done=stages.filter(s=>hist[s]);if(!done.length)return '';
+  let h='';
+  for(const s of done)h+=`<h2>${names[s]}</h2><div class="res">${hist[s].map(row).join('')}</div>`;
+  return h;
+}
 function showHub(){
   phase='menu';
   const me=cup.me;let h='';
   if(cup.stage==='done'&&cup.champ===me){
     h+=`<div class="trophy">🏆</div><div class="eyebrow">MONDIAL 2026</div><h1>Champions <span>du monde</span></h1><p>${tn(me)} soulève le trophée. Une étoile de plus sur le maillot.</p>`;
   }else if(cup.out){
-    h+=`<div class="eyebrow">${tn(me)}</div><h1>Éliminés <span>${ELIM_NAME[cup.out]}</span></h1><p>Le champion du monde est <b style="color:var(--chalk)">${tn(cup.champ)}</b>.</p>`;
+    h+=`<div class="eyebrow">${tn(me)}</div><h1>Éliminés <span>${ELIM_NAME[cup.out]}</span></h1><p>Fais défiler pour suivre la suite de la compétition jusqu’à la finale.</p>`;
   }else{
     const op=nextOpp(),st=STAGE_NAME[cup.stage];
     h+=`<div class="eyebrow">${st}</div>
@@ -1099,7 +1124,8 @@ function showHub(){
       ${boostOf(op)>0?`<p class="note">Bonus de parcours de l’adversaire : +${boostOf(op)} Elo (plafond 2300)</p>`:''}
       <p class="note">Deux mi-temps de 1 min 30 (45´ affichées), changement de côté à la pause. 10 s par pichenette. En cas d’égalité : prolongation au but en or.</p>`;
   }
-  if(cup.last.length){
+  if(cup.stage==='done')h+=bracketHtml(cup.hist,STAGES,STAGE_NAME,me,cup.champ,(t,side)=>side?`${T[t][1]} ${T[t][0]}`:`${T[t][0]} ${T[t][1]}`);
+  else if(cup.last.length){
     const mineFirst=cup.last.slice().sort((x,y)=>((y.a===me||y.b===me)-(x.a===me||x.b===me)));
     h+=`<h2>Résultats · ${cup.lastLabel}</h2>`+resultRows(mineFirst);
   }
