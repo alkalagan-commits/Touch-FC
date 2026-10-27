@@ -1078,7 +1078,11 @@ function showHome(){
     <button class="alt" data-act="cl">${clLabel}</button>
     <button class="small" data-act="duo">PARTIE 2 JOUEURS</button>`);
 }
-const DEF_NAT=Math.max(0,T.findIndex(x=>x[0]==='France')),DEF_CLUB=Math.max(0,T.findIndex(x=>x[0]==='Paris Saint-Germain')); // équipes présélectionnées : France (Mondial), PSG (Champ League)
+// équipe présélectionnée : la dernière choisie sur ce téléphone, sinon France (Mondial) et PSG (Champ League)
+const lastPick=(k,ok,def)=>{try{const v=+localStorage.getItem(k);return localStorage.getItem(k)!==null&&ok(v)?v:def}catch(_){return def}};
+const savePick=(k,t)=>{try{localStorage.setItem(k,t)}catch(_){}};
+let DEF_NAT=lastPick('touchfc-pick-nat',v=>v>=0&&v<NAT,Math.max(0,T.findIndex(x=>x[0]==='France')));
+let DEF_CLUB=lastPick('touchfc-pick-club',v=>v>=NAT&&v<T.length,Math.max(0,T.findIndex(x=>x[0]==='Paris Saint-Germain')));
 function showPicker(){
   const CN={UEFA:'Europe',CONMEBOL:'Amérique du Sud',CONCACAF:'Amérique du Nord et centrale',CAF:'Afrique',AFC:'Asie',OFC:'Océanie'};
   let h='<div class="eyebrow">MONDIAL</div><h1>Choisis ton <span>équipe</span></h1><p>Les 48 nations. Pas de phase de groupes : 32 équipes en seizièmes de finale (la tienne et les meilleures au classement Elo). Ensuite : tirage de ton adversaire.</p><button class="big" data-act="pick" data-t="'+DEF_NAT+'">Jouer avec '+T[DEF_NAT][1]+' '+T[DEF_NAT][0]+'</button><div class="picker">';
@@ -1171,12 +1175,12 @@ card.addEventListener('click',e=>{
   if(a==='home')showHome();
   else if(a==='resume'){phase=paused;paused=null;$('menu').hidden=true;turnT=0;ui();maybeCpu()}
   else if(a==='cup'){paused=null;clearLive();cup&&cup.stage!=='done'&&!cup.out?(mode='cup-hub',showHub()):showPicker()}
-  else if(a==='pick')newCup(+b.dataset.t);
+  else if(a==='pick'){DEF_NAT=+b.dataset.t;savePick('touchfc-pick-nat',DEF_NAT);newCup(DEF_NAT)}
   else if(a==='hub')showHub();
   else if(a==='play')startCupMatch();
   else if(a==='newcup'){cup=null;saveCup();showPicker()}
   else if(a==='cl'){paused=null;clearLive();cl&&cl.stage!=='done'&&!cl.out?(mode='cl-hub',showClHub()):clPicker()}
-  else if(a==='clpick')clSimLeague(+b.dataset.t);
+  else if(a==='clpick'){DEF_CLUB=+b.dataset.t;savePick('touchfc-pick-club',DEF_CLUB);clSimLeague(DEF_CLUB)}
   else if(a==='clhub')showClHub();
   else if(a==='clplay')startClMatch();
   else if(a==='clview'){clView=clView==='all'?'mine':'all';showClHub()}
