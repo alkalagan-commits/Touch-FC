@@ -13,10 +13,11 @@
   color-scheme:dark;
 }
 html,body{height:100%}
+:root{padding-top:0!important;--sat:env(safe-area-inset-top,0px)} /* la marge du haut est gérée par .app, pour que le score ne passe jamais sous l'heure et la batterie */
 [hidden]{display:none!important}
 body{background:var(--ink);color:var(--chalk);font-family:var(--body);overflow:hidden;
   -webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
-.app{height:100%;display:flex;flex-direction:column;gap:6px;
+.app{height:100%;display:flex;flex-direction:column;gap:6px;padding-top:calc(var(--sat) + 6px)!important;
   padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:8px;box-sizing:border-box}
 #bgc{position:fixed;inset:0;width:100%;height:100%;z-index:0;pointer-events:none}
 #roof,#fx{position:fixed;inset:0;width:100%;height:100%;z-index:1;pointer-events:none}
@@ -624,11 +625,13 @@ function fullTime(){
 function endMatch(){
   clearLive();
   sfx.whistle('end');
-  setTimeout(()=>{score.r!==score.b?sfx.roar(true):sfx.applause()},1500); // vainqueur : clameur de but ; nul : applaudissements
+  setTimeout(()=>{const a=match.agg||[0,0];score.r+a[0]!==score.b+a[1]?sfx.roar(true):sfx.applause()},1500); // vainqueur : clameur de but ; nul : applaudissements
   goalRoll=false;phase='over';aim=null;
-  const w=score.r>score.b?'r':score.r<score.b?'b':null;
+  const ag=match.agg,clKo=mode==='cl'&&cl&&cl.stage!=='league'&&cl.stage!=='final',leg1=clKo&&cl.leg===1;
+  const tr=score.r+(ag?ag[0]:0),tb=score.b+(ag?ag[1]:0); // match retour : c'est le qualifié (cumul des deux matchs) qui célèbre
+  const w=tr>tb?'r':tr<tb?'b':null;
   const after=mode==='cup'?afterCupMatch:mode==='cl'?afterClMatch:()=>showOver(w);
-  if(w)celebrate(w,after);
+  if(w)celebrate(w,after,{noFw:leg1,title:ag?'QUALIFIÉ !':leg1?'FIN DU MATCH ALLER':'VICTOIRE !'}); // match aller : pas de feux d'artifice
   else{banner('MATCH NUL',scoreTxt());ui();setTimeout(()=>{$('banner').hidden=true;after()},2200)}
 }
 function maybeCpu(){if(cpu&&turn==='b'&&phase==='aim')setTimeout(cpuShot,650)}
@@ -723,7 +726,7 @@ function cpuShot(){
 }
 
 /* ---------- Fête de fin de match ---------- */
-function celebrate(team,cb){
+function celebrate(team,cb,o={}){
   phase='over';
   const mine=discs.filter(d=>d.team===team);
   const sc=mine[lastScorer[team]]||mine[3];
@@ -738,8 +741,8 @@ function celebrate(team,cb){
   discs.filter(d=>d.team!==team).sort((a,b)=>Math.hypot(a.x,a.y-H/2)-Math.hypot(b.x,b.y-H/2)).forEach((d,i)=>{
     d.path=flip?[{x:W-34,y:H/2+(d.y<H/2?-12:12)},{x:W+M+40,y:H/2}]:[{x:34,y:H/2+(d.y<H/2?-12:12)},{x:-M-40,y:H/2}];d.delay=30+i*26;d.spd=2;d.loser=true;
   });
-  celeb={team,t:0};confetti=[];fireworks=[];sparks=[];ui();
-  banner('VICTOIRE !',mode==='cup'?`${S[team].flag} ${S[team].name}`:'');
+  celeb={team,t:0,noFw:!!o.noFw};confetti=[];fireworks=[];sparks=[];ui();
+  banner(o.title||'VICTOIRE !',mode==='cup'||mode==='cl'?`${S[team].flag||S[team].crest||''} ${S[team].name}`:'');
   setTimeout(()=>{$('banner').hidden=true;if(phase==='over')cb()},5200);
 }
 function animStep(){
@@ -751,7 +754,7 @@ function animStep(){
     if(l<=d.spd){d.x=p.x;d.y=p.y;d.path.shift()}else{d.x+=dx/l*d.spd;d.y+=dy/l*d.spd}
   }
   // feux d'artifice : des fusées partent du rebord du toit et éclatent au-dessus de la pelouse, aux couleurs du vainqueur
-  if(celeb.t>20&&celeb.t<400&&Math.random()<.09){
+  if(!celeb.noFw&&celeb.t>20&&celeb.t<400&&Math.random()<.09){
     const s=S[celeb.team],a=Math.random()*Math.PI*2,c=Math.cos(a),sn=Math.sin(a),R0=ROOF;
     const x0=W/2+R0.A*Math.sign(c)*Math.pow(Math.abs(c),2/R0.N),y0=H/2+R0.B*Math.sign(sn)*Math.pow(Math.abs(sn),2/R0.N);
     const pal=[['#e0b54a','#fff3c4'],[s.main,s.main],[s.sec,s.sec],['#f2efe4','#ffffff']][(Math.random()*4)|0];
@@ -1659,6 +1662,11 @@ document.addEventListener('visibilitychange',()=>{if(document.hidden)leaveApp()}
 addEventListener('pagehide',leaveApp);
 setInterval(()=>{if(phase==='aim'||phase==='moving')saveLive()},3000); // filet de sécurité si l'appli est fermée brutalement
 
+(()=>{ // appli sur l'écran d'accueil : si l'iPhone ne donne pas la hauteur de sa barre d'état, on l'estime d'après le modèle
+  try{const pr=document.createElement('div');pr.style.cssText='position:fixed;top:0;height:0;padding-top:env(safe-area-inset-top,0px);visibility:hidden';document.body.appendChild(pr);
+    const sat=parseFloat(getComputedStyle(pr).paddingTop)||0;pr.remove();
+    if(navigator.standalone&&sat<20){const h=Math.max(screen.height,screen.width);document.documentElement.style.setProperty('--sat',([852,874,932,956].includes(h)?59:h>=812?47:20)+'px')}}catch(_){}
+})();
 reset();resize();
 if(loadLive()){showHome();if(wx.rain)try{rainSound(true)}catch(_){}}else showHome();
 ui();requestAnimationFrame(loop);
