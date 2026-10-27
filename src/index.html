@@ -39,7 +39,7 @@ body{background:var(--ink);color:var(--chalk);font-family:var(--body);overflow:h
 @media (prefers-reduced-motion:reduce){.turn{animation:none}}
 .chip{width:14px;height:14px;border-radius:50%;flex:none;box-shadow:inset 0 -2px 0 rgba(0,0,0,.3),0 0 0 1px rgba(0,0,0,.4)}
 .team.on .chip{outline:2px solid var(--brass);outline-offset:2px}
-.mid{display:flex;flex-direction:column;align-items:center;gap:3px;text-align:center}
+.mid{order:2;display:flex;flex-direction:column;align-items:center;gap:3px;text-align:center}
 .score{font-family:var(--display);font-weight:800;font-size:36px;line-height:1;font-variant-numeric:tabular-nums;
   background:#08130c;border:1px solid #2b4434;border-radius:6px;padding:2px 12px 4px;color:var(--brass)}
 .half{font-family:var(--display);font-weight:600;font-size:13px;line-height:1;letter-spacing:.14em;color:var(--muted);text-transform:uppercase;min-height:13px}
@@ -232,14 +232,16 @@ let scale=1,dpr=1,celeb=null,confetti=[],lastDisc=null,lastScorer={r:0,b:0};
 let discs=[],ball,score={r:0,b:0},turn='r',flicks=1,phase='menu',cpu=false,lastTouch=null,aim=null,kickoff='r';
 let mode=null,paused=null,match=null,cup=null;
 const S={r:null,b:null};
+const hb=()=>!!(S.b&&S.b.home); // l'adversaire joue à domicile : il s'affiche à gauche du tableau et donne le coup d'envoi
+const scoreTxt=()=>hb()?`${score.b}–${score.r}`:`${score.r}–${score.b}`;
 function sideFrom(main,sec,name,flag,skill,pat){return {main,sec,name,flag,skill,pat:pat||''}}
 const skillOf=e=>Math.max(.05,Math.min(.3,.3-(e-1560)/720*.25));
-function setTeams(a,b){
+function setTeams(a,b,homeB){ // a : ton équipe (en bas), b : l'adversaire ; homeB : l'adversaire reçoit (il garde son maillot domicile, c'est toi qui changes en cas de ressemblance)
   const A=T[a],B=T[b];
-  S.r=sideFrom(A[2],A[3],A[0],A[1],skillOf(elo(a)),A[7]);
-  const away=cdist(A[2],B[2])<140&&cdist(A[2],B[5])>cdist(A[2],B[2]);
-  S.b=away?sideFrom(B[5],B[6],B[0],B[1],skillOf(elo(b)),''):sideFrom(B[2],B[3],B[0],B[1],skillOf(elo(b)),B[7]);
-  S.b.away=away;S.r.crest=a>=NAT?crest(a):'';S.b.crest=b>=NAT?crest(b):''; // clubs : écusson au tableau de score
+  const kit=(X,t,alt)=>alt?sideFrom(X[5],X[6],X[0],X[1],skillOf(elo(t)),''):sideFrom(X[2],X[3],X[0],X[1],skillOf(elo(t)),X[7]);
+  const clash=(Hm,Aw)=>cdist(Hm[2],Aw[2])<140&&cdist(Hm[2],Aw[5])>cdist(Hm[2],Aw[2]);
+  if(homeB){const away=clash(B,A);S.b=kit(B,b,false);S.r=kit(A,a,away);S.r.away=away;S.b.away=false;S.b.home=true}
+  else{const away=clash(A,B);S.r=kit(A,a,false);S.b=kit(B,b,away);S.b.away=away}S.r.crest=a>=NAT?crest(a):'';S.b.crest=b>=NAT?crest(b):''; // clubs : écusson au tableau de score
   const GK=['#f2d21b','#ff7a1a','#7a3fd1','#111111','#ff5fa2','#19c3d6'];
   for(const k of ['r','b']){const o=k==='r'?'b':'r';S[k].gk=GK.find(c=>cdist(c,S[k].main)>160&&cdist(c,S[o].main)>160&&(!S[o].gk||cdist(c,S[o].gk)>100))||'#f2d21b'}
 }
@@ -274,7 +276,7 @@ function reset(){
   discs=[...formation('r'),...formation('b')];
   kickoffPlace(discs);
   ball={x:W/2,y:H/2,vx:0,vy:0,r:BR,m:.35,ball:true};
-  turn=kickoff; flicks=1; lastTouch=null; kickFresh=true; sixFresh=false; sixTurn=false; maxFlicks=MAXT; lineRun=0;
+  turn=kickoff; flicks=1; lastTouch=null; kickFresh=true; sixFresh=false; sixTurn=false; maxFlicks=MAXT; lineRun=0; stuckRun=0; oppTouch=false;
 }
 
 /* ---------- Audio : sons de stade sobres et légers (aucun fichier externe, peu de calcul) ---------- */
@@ -432,6 +434,7 @@ function collide(a,b){
   hitter.vx*=.5;hitter.vy*=.5; // après avoir touché le ballon ou un joueur, sa vitesse est divisée par 2
   if(a.ball||b.ball)sfx.kick(-rv);else sfx.clack(-rv);
   if(a.ball){lastTouch=b.team;lastDisc=b} else if(b.ball){lastTouch=a.team;lastDisc=a}
+  if((a.ball||b.ball)&&phase==='moving'&&lastTouch!==turn)oppTouch=true; // même un rebond très bref sur un adversaire annule le droit de rejouer
   if(kickShot&&(a.ball||b.ball))kickTouched=true; // engagement : on peut jouer le ballon dans toutes les directions, même en avant
 }
 function step(){
@@ -455,9 +458,9 @@ const MAXT=2; // touches maximum par possession
 let maxFlicks=MAXT,sixTurn=false,sixFresh=false,sixShot=false,kickShot=false,kickTouched=false,kickFoul=false,kickFresh=false,goalRoll=false,turnT=0,shotZone=true,shooter=null;
 const kicker=()=>discs.filter(d=>d.team===turn).sort((x,y)=>Math.hypot(x.x-ball.x,x.y-ball.y)-Math.hypot(y.x-ball.x,y.y-ball.y))[0];
 const canPlay=d=>d.team===turn&&(!kickFresh||d===kicker())&&(!sixFresh||d.gk); // aux 6 mètres, seul le gardien dégage // à l'engagement, seul le joueur le plus proche du ballon peut jouer
-let shownTurn=null,turnTimer=0,lastShot=null,replayFlash=-1e9;
+let shownTurn=null,turnTimer=0,lastShot=null,replayFlash=-1e9,oppTouch=false; // oppTouch : un adversaire a touché le ballon pendant ce coup → pas de 2e touche
 // pendant le mouvement : la 2e pichenette est-elle encore possible ? (ballon touché par l'équipe qui joue, ou joueur lancé encore en course)
-const secondLive=()=>phase==='moving'&&flicks<maxFlicks&&(lastTouch===turn||(lastTouch===null&&lastShot&&Math.hypot(lastShot.vx,lastShot.vy)>.3));
+const secondLive=()=>phase==='moving'&&flicks<maxFlicks&&!oppTouch&&(lastTouch===turn||(lastTouch===null&&lastShot&&Math.hypot(lastShot.vx,lastShot.vy)>.3));
 function showTurn(){ // bandeau bien visible à chaque changement d'équipe
   const el=$('turnT'),sd=S[turn];
   el.hidden=true;return; // plus aucun bandeau de tour : les cercles des joueurs et le score encadré suffisent
@@ -465,9 +468,9 @@ function showTurn(){ // bandeau bien visible à chaque changement d'équipe
   el.style.borderColor=sd.main;el.hidden=false;el.style.animation='none';void el.offsetWidth;el.style.animation='';
   clearTimeout(turnTimer);turnTimer=setTimeout(()=>{el.hidden=true},1300);
 }
-function setAim(){goalRoll=false;phase='aim';turnT=0;aim=null;if(turn!==shownTurn){shownTurn=turn;showTurn()}ui();maybeCpu()}
+function setAim(){if(flicks===1&&ball)possPos={x:ball.x,y:ball.y};goalRoll=false;phase='aim';turnT=0;aim=null;if(turn!==shownTurn){shownTurn=turn;showTurn()}ui();maybeCpu()}
 function inZone(d){return d.team==='r'?d.y<ZONE:d.y>H-ZONE}
-function shoot(d,vx,vy){lastShot=d;d.vx=vx;d.vy=vy;shooter=d.team;shotZone=inZone(d);phase='moving';lastTouch=null;sixShot=sixFresh&&d.gk;sixTurn=sixShot;sixFresh=false;kickShot=kickFresh;kickTouched=false;kickFoul=false;kickFresh=false;ui()}
+function shoot(d,vx,vy){lastShot=d;d.vx=vx;d.vy=vy;shooter=d.team;shotZone=inZone(d);phase='moving';lastTouch=null;oppTouch=false;sixShot=sixFresh&&d.gk;sixTurn=sixShot;sixFresh=false;kickShot=kickFresh;kickTouched=false;kickFoul=false;kickFresh=false;ui()}
 function timeUp(){
   if(kickFresh){kickoff=turn==='r'?'b':'r';reset();banner('TEMPS ÉCOULÉ','Engagement pour l’adversaire',1300);setAim();return}
   if(endPossession(turn))return;
@@ -491,7 +494,7 @@ function settle(){
   if(kickShot){kickShot=false;
     if(!kickTouched){reset();banner('ENGAGEMENT','Il faut toucher le ballon',1400);setAim();return}}
   sixTurn=false;
-  if(lastTouch===turn&&flicks<maxFlicks){flicks++;replayFlash=performance.now()} // 2e touche : les joueurs actifs clignotent une fois
+  if(lastTouch===turn&&!oppTouch&&flicks<maxFlicks){flicks++;replayFlash=performance.now()} // 2e touche : les joueurs actifs clignotent une fois
   else{if(endPossession(turn))return;turn=turn==='r'?'b':'r';flicks=1;maxFlicks=MAXT}
   setAim();
 }
@@ -499,7 +502,9 @@ const CORNER=60;
 const onEndLine=()=>ball.y<=ball.r+6||ball.y>=H-ball.r-6;
 /* Renvoi au gardien : le ballon touche la ligne de but (toute la largeur, coins compris) à la fin de 3 possessions de suite :
    attaquant, puis défenseur, puis attaquant. Vérifié à chaque fin de possession ; dès que le ballon quitte la ligne, le compte repart à zéro. */
-let lineRun=0,lineEnd=0;
+let lineRun=0,lineEnd=0,stuckRun=0,possPos=null;
+/* Ballon bloqué : près de la ligne de fond (hors cage) et déplacé de moins de 5 px pendant 2 possessions de suite → renvoi au gardien */
+const STUCK_NEAR=BR+18,STUCK_PX=5;
 /* Le but est-il possible ? Il faut un joueur de l'équipe qui puisse atteindre le ballon par derrière sans être gêné,
    le frapper avec un angle jouable, assez fort pour qu'il aille jusqu'au but, et un couloir libre (gardien compris) jusqu'à la cage. */
 function canScore(team){
@@ -527,6 +532,10 @@ function canScore(team){
 }
 const inShootPos=team=>ball.x>BOX.x0&&ball.x<BOX.x1&&(team==='r'?ball.y<BOX.d:ball.y>H-BOX.d); // position de marquer : ballon dans la surface de réparation adverse
 function endPossession(team){ // team : l'équipe dont la possession se termine. Renvoie true si l'arbitre siffle le renvoi
+  const nearEnd=(ball.y<=STUCK_NEAR||ball.y>=H-STUCK_NEAR)&&Math.abs(ball.x-W/2)>GOAL/2;
+  const moved=possPos?Math.hypot(ball.x-possPos.x,ball.y-possPos.y):1e9;
+  stuckRun=nearEnd&&moved<STUCK_PX?stuckRun+1:0;
+  if(stuckRun>=2){stuckRun=0;lineRun=0;sixMeters();return true}
   const end=ball.y<=ball.r+6?-1:ball.y>=H-ball.r-6?1:0;
   if(!end){lineRun=0;return false}
   const att=end<0?'r':'b'; // les Rouges attaquent le but du haut, les Bleus celui du bas
@@ -545,7 +554,7 @@ function sixMeters(title){ // l'arbitre siffle un renvoi aux 6 mètres pour l'é
     const g=discs.find(d=>d.team===def&&d.gk);g.x=ball.x;g.y=top?ball.y-(R+BR+6):ball.y+(R+BR+6); // le gardien se place derrière le ballon
     const opp=discs.filter(d=>d.team!==def).sort((a,b)=>Math.hypot(a.x-ball.x,a.y-ball.y)-Math.hypot(b.x-ball.x,b.y-ball.y))[0];
     opp.x=ball.x; // l'adversaire le plus proche garde sa hauteur mais se place dans l'axe du ballon : sur la trajectoire d'un dégagement tout droit
-    turn=def;flicks=1;maxFlicks=MAXT;sixFresh=true;lineRun=0;setAim();
+    turn=def;flicks=1;maxFlicks=MAXT;sixFresh=true;lineRun=0;stuckRun=0;setAim();
   },1600);
 }
 function goal(team){
@@ -592,10 +601,10 @@ let flip=false; // 2e mi-temps : changement de côté. L'équipe du joueur reste
 function endHalf(){
   aim=null;
   if(match.half===1){
-    phase='goal';goalRoll=false;sfx.whistle('half');banner('MI-TEMPS',`${S.r.name} ${score.r}–${score.b} ${S.b.name}`);ui();
+    phase='goal';goalRoll=false;sfx.whistle('half');banner('MI-TEMPS',hb()?`${S.b.name} ${scoreTxt()} ${S.r.name}`:`${S.r.name} ${scoreTxt()} ${S.b.name}`);ui();
     setTimeout(()=>{
       $('banner').hidden=true;match.half=2;match.left=HALF_MS;flip=true;
-      kickoff='b';reset();shownTurn=null;banner('2e MI-TEMPS','Changement de côté',1400);setAim();sfx.whistle('kick');
+      kickoff=hb()?'r':'b';reset();shownTurn=null;banner('2e MI-TEMPS','Changement de côté',1400);setAim();sfx.whistle('kick');
     },2600);
     return;
   }
@@ -620,7 +629,7 @@ function endMatch(){
   const w=score.r>score.b?'r':score.r<score.b?'b':null;
   const after=mode==='cup'?afterCupMatch:mode==='cl'?afterClMatch:()=>showOver(w);
   if(w)celebrate(w,after);
-  else{banner('MATCH NUL',`${score.r}–${score.b}`);ui();setTimeout(()=>{$('banner').hidden=true;after()},2200)}
+  else{banner('MATCH NUL',scoreTxt());ui();setTimeout(()=>{$('banner').hidden=true;after()},2200)}
 }
 function maybeCpu(){if(cpu&&turn==='b'&&phase==='aim')setTimeout(cpuShot,650)}
 function cpuShot(){
@@ -889,7 +898,7 @@ function clPlayLeg(mine){ // une manche à élimination : aller, puis retour (ou
     if(a===me||b===me){[ga,gb]=a===me?[mine[0],mine[1]]:[mine[1],mine[0]];ap=mine[2]?1:0}
     else{const s=sim(a,b,false);ga=s.ga;gb=s.gb;
       if(f[0]+ga===f[1]+gb){ap=1;const pa=1/(1+Math.pow(10,-(elo(a)-elo(b))/400));Math.random()<pa?ga++:gb++}}
-    res.push({a,b,ga,gb,ap,agg:st!=='final'?[f[0]+ga,f[1]+gb]:null});
+    res.push(st!=='final'?{a:b,b:a,ga:gb,gb:ga,ap,agg:[f[1]+gb,f[0]+ga]}:{a,b,ga,gb,ap,agg:null}); // retour : le club qui reçoit s'affiche à gauche
     winners.push(f[0]+ga>f[1]+gb?a:b);
   });
   cl.hist=cl.hist||{};cl.hist[st]=res;
@@ -922,7 +931,11 @@ function afterClMatch(){
   clAdvance();saveCl();mode='cl-hub';showClHub();
 }
 function startClMatch(){
-  const me=cl.me,op=clNext();setTeams(me,op);mode='cl';cpu=true;
+  const me=cl.me,op=clNext();
+  let homeMe=true; // aller : le 1er club de l'affiche reçoit ; retour : on inverse ; finale : terrain neutre
+  if(cl.stage==='league'){const f=clMine().find(f=>f.ga==null);homeMe=!f||f.a===me}
+  else if(cl.stage!=='final'){const p=cl.ko.find(p=>p.includes(me));homeMe=cl.leg===1?p[0]===me:p[1]===me}
+  setTeams(me,op,!homeMe);mode='cl';cpu=true;
   const ko=cl.stage!=='league'&&(cl.stage==='final'||cl.leg===2);
   let agg=null;if(ko&&cl.stage!=='final'){const k=cl.ko.findIndex(p=>p.includes(me)),f=cl.first[k];agg=cl.ko[k][0]===me?[f[0],f[1]]:[f[1],f[0]]}
   match={ko,agg,golden:false};begin();
@@ -964,8 +977,10 @@ function showClHub(){
     const op=clNext(),lg=cl.stage==='league';
     const st=lg?`Phase de ligue · journée ${cl.md+1}/8`:CL_NAME[cl.stage]+(cl.stage!=='final'?(cl.leg===1?' · aller':' · retour'):'');
     let agg='';if(!lg&&cl.leg===2&&cl.stage!=='final'){const k=cl.ko.findIndex(p=>p.includes(me)),f=cl.first[k],m=cl.ko[k][0]===me?f:[f[1],f[0]];agg=`<p class="note">Match aller : ${m[0]}–${m[1]}. Le cumul des deux matchs qualifie ; égalité : prolongation au but en or.</p>`}
+    let hm=me,aw=op;if(!lg&&cl.stage!=='final'){const p=cl.ko.find(p=>p.includes(me));hm=cl.leg===1?p[0]:p[1];aw=hm===me?op:me}
+    const tmH=t=>`<div class="tm"><span class="fl">${crest(t)}</span>${T[t][0]}<span class="note">Elo ${elo(t)}${cl.stage!=='final'?(t===hm?' · domicile':' · extérieur'):''}</span></div>`;
     h+=`<div class="eyebrow">${st}</div>
-      <div class="fixture"><div class="tm"><span class="fl">${crest(me)}</span>${T[me][0]}<span class="note">Elo ${elo(me)}</span></div><span class="vs">contre</span><div class="tm"><span class="fl">${crest(op)}</span>${T[op][0]}<span class="note">Elo ${elo(op)}</span></div></div>
+      <div class="fixture">${tmH(hm)}<span class="vs">contre</span>${tmH(aw)}</div>
       <button class="big" data-act="clplay">Jouer le match</button>${agg}
       <p class="note">Deux mi-temps de 1 min 30 (45´ affichées), changement de côté à la pause.${cl.stage==='final'?' Finale sur un match : en cas d’égalité, but en or.':''}</p>`;
   }
@@ -1038,7 +1053,7 @@ function begin(noIntro){
   wx={night:window.__night??Math.random()<.5,rain:Math.random()<.5,mow:(Math.random()*5)|0};
   drops=wx.rain?Array.from({length:90},()=>({x:Math.random()*(W+2*M)-M,y:Math.random()*(H+2*M)-M,s:9+Math.random()*6})):[];
   rainSound(wx.rain);
-  score={r:0,b:0};kickoff='r';goalCel=null;celeb=null;confetti=[];fireworks=[];sparks=[];lastDisc=null;paused=null;clearLive();flip=false;
+  score={r:0,b:0};kickoff=hb()?'b':'r';goalCel=null;celeb=null;confetti=[];fireworks=[];sparks=[];lastDisc=null;paused=null;clearLive();flip=false;
   match=Object.assign(match||{ko:false},{half:1,left:HALF_MS,golden:false});lastSecClock=-1;
   shownTurn=null;intro=null;reset();$('menu').hidden=true;$('banner').hidden=true;if(noIntro){setAim();sfx.whistle('kick')}else startIntro();
 }
@@ -1141,7 +1156,7 @@ function showOver(team){
   const human=!cpu||team==='r';
   const head=team?`<div class="trophy" style="font-size:44px">${S[team].flag}</div><h1>${S[team].name} <span>gagne</span></h1>`:`<div class="trophy" style="font-size:44px">${S.r.flag} ${S.b.flag}</div><h1>Match <span>nul</span></h1>`;
   open(`${head}
-    <p>Score final ${score.r}–${score.b}. ${!team?'Égalité au coup de sifflet final.':cpu?(human?'Tu as battu l’IA.':'L’IA gagne cette fois.'):'Belle partie.'}</p>
+    <p>Score final ${scoreTxt()}. ${!team?'Égalité au coup de sifflet final.':cpu?(human?'Tu as battu l’IA.':'L’IA gagne cette fois.'):'Belle partie.'}</p>
     <button class="big" data-act="${cpu?'cpu':'duo'}">Rejouer</button>
     <button class="small" data-act="home">Menu principal</button>`);
 }
@@ -1170,7 +1185,7 @@ function openMenu(){
 }
 
 function ui(){
-  $('score').textContent=`${score.r}–${score.b}`;
+  $('score').textContent=scoreTxt();$('tR').style.order=hb()?3:1;$('tB').style.order=hb()?1:3;
   const live=phase!=='menu';
   for(const s of ['r','b']){
     const el=$(s==='r'?'tR':'tB');el.classList.toggle('on',turn===s&&live);
@@ -1182,13 +1197,14 @@ function ui(){
     c=match.golden?'<span class="t">But en or</span>':`<span class="t${sec<=10?' low':''}">${(match.half===2?45:0)+Math.min(45,Math.floor((HALF_MS-match.left)/(HALF_MS/45))+1)}´</span>`} // minute de jeu : 1´ à 45´ en 1 min 30 (46´ à 90´ en 2e mi-temps)
   $('half').textContent=hf;$('clock').innerHTML=c;
   const rd=$('round'),inMatch=mode==='cup'&&cup&&phase!=='menu'&&STAGE_NAME[cup.stage];
-  rd.hidden=!inMatch;if(inMatch)rd.textContent=STAGE_NAME[cup.stage];
+  const clRd=mode==='cl'&&cl&&phase!=='menu'&&cl.stage!=='done'?CL_NAME[cl.stage]+(cl.stage!=='final'&&cl.stage!=='league'?(cl.leg===1?' · aller':' · retour'):''):''; // CHAMP LEAGUE : le tour sous le score, comme au Mondial
+  rd.hidden=!inMatch&&!clRd;if(inMatch)rd.textContent=STAGE_NAME[cup.stage];else if(clRd)rd.textContent=clRd;
   const who=S[turn].name;
   let m='Choisis un mode de jeu.';
   if(phase==='aim')m=cpu&&turn==='b'?`<b>${who}</b> réfléchit…`:`<b>${who}</b> · ${Math.max(0,Math.ceil((TURN_MS-turnT)/1000))} s · ${kickFresh?'engagement':sixFresh?'renvoi : dégagement du gardien':'touche '+flicks+'/'+maxFlicks}${lineRun?' · ligne de but '+lineRun+'/3':''}`;
   if(phase==='moving')m=`<b>${who}</b> · touche ${flicks}/${maxFlicks}`;
   if(phase==='goal')m='Engagement pour l’équipe qui a encaissé.';
-  if(phase==='over'&&celeb)m=`<b>Victoire : ${S[celeb.team].name}</b> ${score.r}–${score.b}`;
+  if(phase==='over'&&celeb)m=`<b>Victoire : ${S[celeb.team].name}</b> ${scoreTxt()}`;
   if(phase==='intro')m='Entrée des joueurs';
   if(phase==='menu')m=paused?'Match en pause.':(cup&&mode==='cup-hub'?`<b>MONDIAL</b> · ${T[cup.me][0]}`:cl&&mode==='cl-hub'?`<b>CHAMP LEAGUE</b> · ${T[cl.me][0]}`:'Choisis un mode de jeu.');
 }
@@ -1619,7 +1635,7 @@ function saveLive(){
     const ph=phase==='aim'||phase==='moving'?phase:paused;
     if(!ph||!match){localStorage.removeItem(LIVE_KEY);return}
     localStorage.setItem(LIVE_KEY,JSON.stringify({ph,discs,ball,score,turn,flicks,maxFlicks,kickoff,lastTouch,lastScorer,
-      sixTurn,sixFresh,sixShot,kickShot,kickTouched,kickFoul,kickFresh,shotZone,shooter,lineRun,lineEnd,
+      sixTurn,sixFresh,sixShot,kickShot,kickTouched,kickFoul,kickFresh,shotZone,shooter,lineRun,lineEnd,stuckRun,possPos,oppTouch,
       lastShot:discs.indexOf(lastShot),match,mode,cpu,S,flip,wx,stake,roofStyle,ballStyle,t:Date.now()}));
   }catch(_){}
 }
@@ -1629,7 +1645,7 @@ function loadLive(){
   if(!L||!L.discs||!L.match)return false;
   if((L.mode==='cup'&&!cup)||(L.mode==='cl'&&!cl)){clearLive();return false} // compétition abandonnée entre-temps
   ({discs,ball,score,turn,flicks,maxFlicks,kickoff,lastTouch,lastScorer,sixTurn,sixFresh,sixShot,kickShot,kickTouched,kickFoul,kickFresh,
-    shotZone,shooter,lineRun,lineEnd,match,mode,cpu,flip,wx,stake,roofStyle,ballStyle}=L);
+    shotZone,shooter,lineRun,lineEnd,stuckRun=0,possPos=null,oppTouch=false,match,mode,cpu,flip,wx,stake,roofStyle,ballStyle}=L);
   S.r=L.S.r;S.b=L.S.b;lastShot=discs[L.lastShot]||null;
   drops=wx.rain?Array.from({length:90},()=>({x:Math.random()*(W+2*M)-M,y:Math.random()*(H+2*M)-M,s:9+Math.random()*6})):[];
   paused=L.ph;phase='menu';aim=null;intro=null;goalCel=null;celeb=null;shownTurn=turn;turnT=0;lastSecClock=-1;roofKey='';bgKey='';
