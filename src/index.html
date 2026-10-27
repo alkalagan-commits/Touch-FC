@@ -31,6 +31,9 @@ body{background:var(--ink);color:var(--chalk);font-family:var(--body);overflow:h
 .team .fl{font-size:30px;line-height:1}
 .team .nm{white-space:normal;text-wrap:balance;line-height:1.05;max-width:100%;overflow-wrap:anywhere}
 .team.on{color:var(--chalk)}
+.board{grid-template-columns:minmax(72px,1fr) minmax(0,auto) minmax(72px,1fr)!important}
+.board .round{white-space:normal;text-wrap:balance;text-align:center;line-height:1.1}
+.team .nm.code{font-weight:800;font-size:24px;letter-spacing:.06em;line-height:1;white-space:nowrap;overflow-wrap:normal;text-wrap:nowrap}
 .team{padding:5px 6px;border-radius:10px;transition:background .25s,color .25s}
 .team.on{background:rgba(224,181,74,.16);box-shadow:inset 0 0 0 1px rgba(224,181,74,.55)}
 .turn{position:absolute;top:10px;left:50%;transform:translateX(-50%);pointer-events:none;white-space:nowrap;
@@ -238,12 +241,15 @@ const hb=()=>!!(S.b&&S.b.home); // l'adversaire joue à domicile : il s'affiche 
 const scoreTxt=()=>hb()?`${score.b}–${score.r}`:`${score.r}–${score.b}`;
 function sideFrom(main,sec,name,flag,skill,pat){return {main,sec,name,flag,skill,pat:pat||''}}
 const skillOf=e=>Math.max(.05,Math.min(.3,.3-(e-1560)/720*.25));
+// abréviations à 3 lettres affichées au tableau de score pendant le match, comme à la télé (codes FIFA pour les nations)
+const NCODE='MEX RSA KOR CZE CAN BIH QAT SUI BRA MAR HAI SCO USA PAR AUS TUR GER CUW CIV ECU NED JPN SWE TUN BEL EGY IRN NZL ESP CPV KSA URU FRA SEN IRQ NOR ARG ALG AUT JOR POR COD UZB COL ENG CRO GHA PAN'.split(' ');
+const codeOf=t=>t<NAT?(NCODE[t]||T[t][0].slice(0,3).toUpperCase()):({OM:'MAR'}[T[t][9]]||T[t][9]||T[t][0].slice(0,3).toUpperCase());
 function setTeams(a,b,homeB){ // a : ton équipe (en bas), b : l'adversaire ; homeB : l'adversaire reçoit (il garde son maillot domicile, c'est toi qui changes en cas de ressemblance)
   const A=T[a],B=T[b];
   const kit=(X,t,alt)=>alt?sideFrom(X[5],X[6],X[0],X[1],skillOf(elo(t)),''):sideFrom(X[2],X[3],X[0],X[1],skillOf(elo(t)),X[7]);
   const clash=(Hm,Aw)=>cdist(Hm[2],Aw[2])<140&&cdist(Hm[2],Aw[5])>cdist(Hm[2],Aw[2]);
   if(homeB){const away=clash(B,A);S.b=kit(B,b,false);S.r=kit(A,a,away);S.r.away=away;S.b.away=false;S.b.home=true}
-  else{const away=clash(A,B);S.r=kit(A,a,false);S.b=kit(B,b,away);S.b.away=away}S.r.crest=a>=NAT?crest(a):'';S.b.crest=b>=NAT?crest(b):''; // clubs : écusson au tableau de score
+  else{const away=clash(A,B);S.r=kit(A,a,false);S.b=kit(B,b,away);S.b.away=away}S.r.code=codeOf(a);S.b.code=codeOf(b);S.r.crest=a>=NAT?crest(a):'';S.b.crest=b>=NAT?crest(b):''; // clubs : écusson au tableau de score
   const GK=['#f2d21b','#ff7a1a','#7a3fd1','#111111','#ff5fa2','#19c3d6'];
   for(const k of ['r','b']){const o=k==='r'?'b':'r';S[k].gk=GK.find(c=>cdist(c,S[k].main)>160&&cdist(c,S[o].main)>160&&(!S[o].gk||cdist(c,S[o].gk)>100))||'#f2d21b'}
 }
@@ -1198,7 +1204,7 @@ function ui(){
   const live=phase!=='menu';
   for(const s of ['r','b']){
     const el=$(s==='r'?'tR':'tB');el.classList.toggle('on',turn===s&&live);
-    $(s==='r'?'nR':'nB').innerHTML=(S[s].crest||S[s].flag?`<span class="fl">${S[s].crest||S[s].flag}</span>`:'')+`<span class="nm">${S[s].name}</span>`;
+    $(s==='r'?'nR':'nB').innerHTML=(S[s].crest||S[s].flag?`<span class="fl">${S[s].crest||S[s].flag}</span>`:'')+(live&&S[s].code?`<span class="nm code">${S[s].code}</span>`:`<span class="nm">${S[s].name}</span>`);
   }
   let c='2 × 45´',hf='';
   if(match&&match.half){const sec=Math.max(0,Math.ceil(match.left/1000));
