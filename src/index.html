@@ -271,11 +271,11 @@ function formation(team){
     gk:i===0,skin:SK[(i*3+(top?2:0)+score.r+score.b)%5],hair:HR[(i*2+(top?1:4))%5]}));
 }
 /* Engagement : le milieu de l'équipe qui engage est centré dans le rond central, juste derrière le ballon ;
-   le milieu de l'équipe qui défend est centré, collé au rond central, dans son camp. */
+   le milieu de l'équipe qui défend est centré dans son camp, un peu en retrait du rond central. */
 function kickoffPlace(list){
   const k=list.filter(d=>d.team===kickoff)[4],o=list.filter(d=>d.team!==kickoff)[4],up=kickoff==='r'?1:-1; // les Rouges défendent le bas
   k.x=W/2;k.y=H/2+up*(R+BR+8);
-  o.x=W/2;o.y=H/2-up*(82+R+2);
+  o.x=W/2;o.y=H/2-up*(82+R+30); // un peu en retrait du rond central, plus collé à la ligne
   // les deux latéraux se resserrent autour du défenseur central pour protéger le but
   for(const t of ['r','b']){const L=list.filter(d=>d.team===t),dn=t==='r'?1:-1;
     for(const d of [L[1],L[3]]){d.x=W/2+Math.sign(d.x-W/2)*92;d.y+=dn*28}}
