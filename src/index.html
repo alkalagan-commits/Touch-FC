@@ -1274,7 +1274,7 @@ $('clock').addEventListener('click',()=>{initAudio();if(phase!=='menu')openMenu(
 function resize(){
   const r=stage.getBoundingClientRect();dpr=window.devicePixelRatio||1;
   // pelouse en grand : sur les côtés, on ne garde que les panneaux et un liseré de tribune (le reste déborde de l'écran)
-  const VIS=44;scale=Math.min(innerWidth/(W+2*VIS),r.height/(H+2*50)); // en haut et en bas aussi, les tribunes peuvent passer sous le tableau de score et le chrono
+  const VIS=52;scale=Math.min(innerWidth/(W+2*VIS),r.height/(H+2*50)); // en haut et en bas aussi, les tribunes peuvent passer sous le tableau de score et le chrono
   cv.style.width=(W+2*M)*scale+'px';cv.style.height=(H+2*M)*scale+'px';
   cv.width=Math.round((W+2*M)*scale*dpr);cv.height=Math.round((H+2*M)*scale*dpr);
 }
