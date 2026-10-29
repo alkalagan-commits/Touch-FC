@@ -13,12 +13,12 @@
   color-scheme:dark;
 }
 html,body{height:100%}
-:root{padding-top:0!important;--sat:env(safe-area-inset-top,0px)} /* la marge du haut est gérée par .app, pour que le score ne passe jamais sous l'heure et la batterie */
+:root{padding-top:0!important;padding-bottom:0!important;--sat:env(safe-area-inset-top,0px);--sab:env(safe-area-inset-bottom,0px)} /* la marge du haut est gérée par .app, pour que le score ne passe jamais sous l'heure et la batterie */
 [hidden]{display:none!important}
 body{background:var(--ink);color:var(--chalk);font-family:var(--body);overflow:hidden;
   -webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
-.app{height:100%;display:flex;flex-direction:column;gap:6px;padding-top:calc(var(--sat) + 6px)!important;
-  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:8px;box-sizing:border-box}
+.app{height:100%;display:flex;flex-direction:column;gap:6px;padding-top:calc(var(--sat) + 1px)!important;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:8px;box-sizing:border-box;padding-bottom:calc(var(--sab)*.08 + 1px)!important} /* chrono descendu au plus près de la barre d'accueil de l'iPhone */
 #bgc{position:fixed;inset:0;width:100%;height:100%;z-index:0;pointer-events:none}
 #roof,#fx{position:fixed;inset:0;width:100%;height:100%;z-index:1;pointer-events:none}
 .board{position:relative;z-index:2}
@@ -1684,7 +1684,8 @@ setInterval(()=>{if(phase==='aim'||phase==='moving')saveLive()},3000); // filet 
 (()=>{ // appli sur l'écran d'accueil : si l'iPhone ne donne pas la hauteur de sa barre d'état, on l'estime d'après le modèle
   try{const pr=document.createElement('div');pr.style.cssText='position:fixed;top:0;height:0;padding-top:env(safe-area-inset-top,0px);visibility:hidden';document.body.appendChild(pr);
     const sat=parseFloat(getComputedStyle(pr).paddingTop)||0;pr.remove();
-    if(navigator.standalone&&sat<20){const h=Math.max(screen.height,screen.width);document.documentElement.style.setProperty('--sat',([852,874,932,956].includes(h)?59:h>=812?47:20)+'px')}}catch(_){}
+    if(navigator.standalone&&sat<20&&innerHeight>screen.height-20){ // seulement si la page passe vraiment sous la barre d'état : sinon le score était décalé deux fois
+      const h=Math.max(screen.height,screen.width);document.documentElement.style.setProperty('--sat',([852,874,932,956].includes(h)?59:h>=812?47:20)+'px')}}catch(_){}
 })();
 reset();resize();
 if(loadLive()){showHome();if(wx.rain)try{rainSound(true)}catch(_){}}else showHome();
