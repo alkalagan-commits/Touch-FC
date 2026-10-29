@@ -109,7 +109,8 @@ button:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
 .note{font-size:12px;color:var(--muted)}
 .trophy{font-size:56px;line-height:1}
 .round{font-family:var(--display);font-weight:800;font-size:15px;line-height:1;letter-spacing:.12em;text-transform:uppercase;color:var(--brass);white-space:nowrap}
-.clock.big{position:relative;z-index:2;align-self:center;font-size:16px;background:rgba(10,22,14,.84);border-radius:12px;padding:4px 10px}
+.agg{font-family:var(--display);font-weight:800;font-size:16px;line-height:1;letter-spacing:.04em;font-variant-numeric:tabular-nums;color:var(--chalk)}
+.clock.big{position:relative;z-index:2;cursor:pointer;align-self:center;font-size:16px;background:rgba(10,22,14,.84);border-radius:12px;padding:4px 10px}
 .clock.big .t{font-size:40px;padding:3px 16px 5px}
 .banner{position:absolute;left:0;right:0;top:40%;text-align:center;font-family:var(--display);font-weight:800;font-size:60px;line-height:1;color:var(--brass);
   text-shadow:0 3px 0 #000;pointer-events:none;padding:0 12px}
@@ -133,7 +134,7 @@ details.br[open] summary::after{content:'–'}
   <canvas id="fx" aria-hidden="true"></canvas>
   <header class="board">
     <div class="team r" id="tR"><span id="nR" style="display:contents">Domicile</span></div>
-    <div class="mid"><div class="half" id="half"></div><div class="score" id="score">0–0</div><div class="round" id="round" hidden></div></div>
+    <div class="mid"><div class="half" id="half"></div><div class="score" id="score">0–0</div><div class="agg" id="agg" hidden></div><div class="round" id="round" hidden></div></div>
     <div class="team b" id="tB"><span id="nB" style="display:contents">Extérieur</span></div>
   </header>
   <div class="stage" id="stage">
@@ -842,6 +843,8 @@ const ctn=t=>`${crest(t)} ${T[t][0]}`;
    1er à 8e : directement en huitièmes ; 9e à 24e : barrages ; 25e à 36e : éliminés.
    Barrages, huitièmes, quarts et demies en aller-retour (cumul des buts, but en or au retour si égalité) ; finale sur un match. */
 const CL_KEY='touchfc-cl-v1';
+const SHORT_NAME={r32:'16e de finale',r16:'8e de finale',qf:'Quarts de finale',sf:'Demi-finales',final:'Finale',po:'Barrages',league:'Phase de ligue'}; // libellés courts sous le score
+const LEG_SHORT={po:'Barrages',r16:'8e',qf:'Quarts',sf:'Demies'}; // aller-retour : « 8e retour », pour tenir sur une ligne
 const CL_STAGES=['po','r16','qf','sf','final'];
 const CL_NAME={league:'Phase de ligue',po:'Barrages',r16:'Huitièmes de finale',qf:'Quarts de finale',sf:'Demi-finales',final:'Finale'};
 const CL_ELIM={league:'en phase de ligue',po:'en barrages',r16:'en huitièmes de finale',qf:'en quarts de finale',sf:'en demi-finale',final:'en finale'};
@@ -1212,8 +1215,10 @@ function ui(){
     c=match.golden?'<span class="t">But en or</span>':`<span class="t${sec<=10?' low':''}">${(match.half===2?45:0)+Math.min(45,Math.floor((HALF_MS-match.left)/(HALF_MS/45))+1)}´</span>`} // minute de jeu : 1´ à 45´ en 1 min 30 (46´ à 90´ en 2e mi-temps)
   $('half').textContent=hf;$('clock').innerHTML=c;
   const rd=$('round'),inMatch=mode==='cup'&&cup&&phase!=='menu'&&STAGE_NAME[cup.stage];
-  const clRd=mode==='cl'&&cl&&phase!=='menu'&&cl.stage!=='done'?CL_NAME[cl.stage]+(cl.stage!=='final'&&cl.stage!=='league'?(cl.leg===1?' · aller':' · retour'):''):''; // CHAMP LEAGUE : le tour sous le score, comme au Mondial
-  rd.hidden=!inMatch&&!clRd;if(inMatch)rd.textContent=STAGE_NAME[cup.stage];else if(clRd)rd.textContent=clRd;
+  const clRd=mode==='cl'&&cl&&phase!=='menu'&&cl.stage!=='done'?(cl.stage!=='final'&&cl.stage!=='league'?LEG_SHORT[cl.stage]+(cl.leg===1?' aller':' retour'):SHORT_NAME[cl.stage]):''; // CHAMP LEAGUE : le tour sous le score, comme au Mondial
+  rd.hidden=!inMatch&&!clRd;const rdTxt=inMatch?SHORT_NAME[cup.stage]:clRd;if(rdTxt)rd.innerHTML=rdTxt.replace(/(\d+)e\b/g,'$1<span style="text-transform:none">e</span>'); // « 8e » reste en minuscule malgré les majuscules du tableau
+  const ag=$('agg'),aa=mode==='cl'&&phase!=='menu'&&match&&match.agg;ag.hidden=!aa; // match retour : score cumulé sous le score, dans le même ordre que le tableau
+  if(aa){const cr=score.r+aa[0],cb=score.b+aa[1];ag.textContent=hb()?`(${cb}–${cr})`:`(${cr}–${cb})`}
   const who=S[turn].name;
   let m='Choisis un mode de jeu.';
   if(phase==='aim')m=cpu&&turn==='b'?`<b>${who}</b> réfléchit…`:`<b>${who}</b> · ${Math.max(0,Math.ceil((TURN_MS-turnT)/1000))} s · ${kickFresh?'engagement':sixFresh?'renvoi : dégagement du gardien':'touche '+flicks+'/'+maxFlicks}${lineRun?' · ligne de but '+lineRun+'/3':''}`;
@@ -1262,12 +1267,14 @@ function release(){
   if(!aim)return;const {d}=aim;let dx=d.x-aim.x,dy=d.y-aim.y,l=Math.hypot(dx,dy);aim=null;
   if(l<14||phase!=='aim')return;const v=Math.min(l,MAXDRAG)/MAXDRAG*MAXV;shoot(d,dx/l*v,dy/l*v);
 }
-cv.addEventListener('pointerup',release);cv.addEventListener('pointercancel',()=>aim=null);
+cv.addEventListener('pointerup',release);
+$('clock').addEventListener('click',()=>{initAudio();if(phase!=='menu')openMenu()}); // le chrono ouvre aussi le menu : le tunnel est presque hors de l'écran depuis que la pelouse est agrandiecv.addEventListener('pointercancel',()=>aim=null);
 
 /* ---------- Rendu ---------- */
 function resize(){
   const r=stage.getBoundingClientRect();dpr=window.devicePixelRatio||1;
-  scale=Math.min(r.width/(W+2*M),r.height/(H+2*M));
+  // pelouse en grand : sur les côtés, on ne garde que les panneaux et un liseré de tribune (le reste déborde de l'écran)
+  const VIS=28;scale=Math.min(innerWidth/(W+2*VIS),r.height/(H+2*50)); // en haut et en bas aussi, les tribunes peuvent passer sous le tableau de score et le chrono
   cv.style.width=(W+2*M)*scale+'px';cv.style.height=(H+2*M)*scale+'px';
   cv.width=Math.round((W+2*M)*scale*dpr);cv.height=Math.round((H+2*M)*scale*dpr);
 }
