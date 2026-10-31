@@ -288,103 +288,256 @@ function reset(){
   turn=kickoff; flicks=1; lastTouch=null; kickFresh=true; sixFresh=false; sixTurn=false; maxFlicks=MAXT; lineRun=0; stuckRun=0; oppTouch=false;
 }
 
-/* ---------- Audio : sons de stade sobres et légers (aucun fichier externe, peu de calcul) ---------- */
-let rainG=null,ac=null,master=null,noiseBuf=null,crowdG=null,muted=false,lastHit={};
+/* ---------- Audio : ambiance de stade façon jeu vidéo de foot ----------
+   Tout est synthétisé (aucun fichier externe). Trois choses font « vrai match » : une réverbération de grand stade (échos des tribunes d'en face),
+   une image stéréo large (la foule est partout autour), et une tribune vivante (brouhaha, chœurs, tambours, cris et sifflets isolés). */
+let rainG=null,ac=null,master=null,verb=null,noiseBuf=null,noiseBuf2=null,crowdG=null,muted=false,lastHit={};
+let busS=null,busC=null,busW=null,busA=null; // départs : effets de jeu, tribune, sifflet de l'arbitre, hymnes
 try{localStorage.removeItem('pichenette-mute')}catch(_){} // plus de bouton son : le son est toujours actif
+const rr=(a,b)=>a+Math.random()*(b-a);
+const mf=n=>440*Math.pow(2,(n-69)/12);
+function pinkBuf(sec){const b=ac.createBuffer(1,ac.sampleRate*sec|0,ac.sampleRate),d=b.getChannelData(0);let last=0;
+  for(let i=0;i<d.length;i++){const w=Math.random()*2-1;last=(last+.04*w)/1.04;d[i]=last*3.2+w*.25}return b}
+function stadiumIR(){ // grand stade : queue de 2,8 s + échos des tribunes d'en face, un peu décalés entre gauche et droite
+  const sr=ac.sampleRate,n=sr*2.8|0,b=ac.createBuffer(2,n,sr);
+  for(let c=0;c<2;c++){const d=b.getChannelData(c);
+    for(let i=0;i<n;i++){const t=i/sr;d[i]=(Math.random()*2-1)*Math.exp(-t*2.6)*(t<.01?t/.01:1)*.5}
+    for(const [e,a] of [[.085+c*.011,.5],[.19+c*.017,.3],[.31+c*.009,.18]]){const s=e*sr|0;for(let i=0;i<sr*.03;i++)d[s+i]+=(Math.random()*2-1)*a*Math.exp(-i/(sr*.008))}}
+  return b}
+function mkBus(dry,wet){const g=ac.createGain();g.gain.value=dry;g.connect(master);const s=ac.createGain();s.gain.value=wet;g.connect(s);s.connect(verb);return g}
+function pan(node,p,dest){if(ac.createStereoPanner){const P=ac.createStereoPanner();P.pan.value=p;node.connect(P);P.connect(dest)}else node.connect(dest)}
+function wide(node,dest){pan(node,-.55,dest);const d=ac.createDelay(.05);d.delayTime.value=.021;node.connect(d);pan(d,.55,dest)} // effet de largeur
+function bp(f,q){const n=ac.createBiquadFilter();n.type='bandpass';n.frequency.value=f;n.Q.value=q;return n}
+function voices(mix,list,arr,base){ // chœur : scies détunées + vibrato commun, comme des milliers de gorges
+  const vib=ac.createOscillator();vib.frequency.value=5.2;const vg=ac.createGain();vg.gain.value=9;vib.connect(vg);vib.start();
+  for(const m of list){const o=ac.createOscillator();o.type='sawtooth';o.frequency.value=(base?base*m:m)*(1+(Math.random()-.5)*.025);vg.connect(o.detune);o.connect(mix);o.start();arr.push(base?{o,m}:o)}
+}
 function initAudio(){
   if(ac)return;try{ac=new (window.AudioContext||window.webkitAudioContext)()}catch(_){return}
-  master=ac.createGain();master.gain.value=muted?0:.9;master.connect(ac.destination);
-  noiseBuf=ac.createBuffer(1,ac.sampleRate*2,ac.sampleRate);
-  const d=noiseBuf.getChannelData(0);let last=0;
-  for(let i=0;i<d.length;i++){const w=Math.random()*2-1;last=(last+.04*w)/1.04;d[i]=last*3.2+w*.25}
-  const src=ac.createBufferSource();src.buffer=noiseBuf;src.loop=true;   // rumeur de tribune, une seule source en boucle
-  const f=ac.createBiquadFilter();f.type='bandpass';f.frequency.value=550;f.Q.value=.8;
-  const rs=ac.createBufferSource();rs.buffer=noiseBuf;rs.loop=true;const rf=ac.createBiquadFilter();rf.type='highpass';rf.frequency.value=2600;
-  rainG=ac.createGain();rainG.gain.value=0;rs.connect(rf).connect(rainG).connect(master);rs.start();rainSound(wx.rain);
-  crowdG=ac.createGain();crowdG.gain.value=0;src.connect(f).connect(crowdG).connect(master);src.start();
-  // chœur de tribune permanent (8 voix + souffle) passé dans 2 formants : on ne fait que régler son volume et sa voyelle
-  chF1=ac.createBiquadFilter();chF1.type='bandpass';chF1.frequency.value=480;chF1.Q.value=4;
-  chF2=ac.createBiquadFilter();chF2.type='bandpass';chF2.frequency.value=880;chF2.Q.value=6;
-  const f2g=ac.createGain();f2g.gain.value=.45;chG=ac.createGain();chG.gain.value=0;
-  const mix=ac.createGain();mix.gain.value=.16;mix.connect(chF1).connect(chG);mix.connect(chF2).connect(f2g).connect(chG);chG.connect(master);
-  [112,131,147,163,184,205,229,256].forEach(fq=>{const o=ac.createOscillator();o.type='sawtooth';o.frequency.value=fq*(1+(Math.random()-.5)*.03);o.connect(mix);o.start();chO.push(o)});
-  const br=ac.createBufferSource();br.buffer=noiseBuf;br.loop=true;const bg=ac.createGain();bg.gain.value=.5;br.connect(bg).connect(mix);br.start();
+  const comp=ac.createDynamicsCompressor();comp.threshold.value=-16;comp.knee.value=12;comp.ratio.value=4;comp.attack.value=.004;comp.release.value=.25;comp.connect(ac.destination);
+  master=ac.createGain();master.gain.value=muted?0:.95;master.connect(comp);
+  const vin=ac.createBiquadFilter();vin.type='lowpass';vin.frequency.value=5500;const conv=ac.createConvolver();conv.buffer=stadiumIR();
+  const vout=ac.createGain();vout.gain.value=.9;vin.connect(conv);conv.connect(vout);vout.connect(master);verb=vin;
+  busS=mkBus(1,.14);busC=mkBus(.85,.5);busW=mkBus(.8,.45);busA=mkBus(.75,.6);
+  noiseBuf=pinkBuf(2);noiseBuf2=pinkBuf(2.3);
+  rainG=ac.createGain();rainG.gain.value=0;
+  // 1. Rumeur de tribune : deux nappes décorrélées à gauche et à droite + un brouhaha de voix qui ondule lentement
+  crowdG=ac.createGain();crowdG.gain.value=0;crowdG.connect(busC);
+  [[noiseBuf,-.75],[noiseBuf2,.75]].forEach(([buf,p])=>{const s=ac.createBufferSource();s.buffer=buf;s.loop=true;
+    const f=bp(520,.6),lo=ac.createBiquadFilter();lo.type='lowshelf';lo.frequency.value=180;lo.gain.value=6;
+    s.connect(f);f.connect(lo);pan(lo,p,crowdG);s.start()});
+  [[700,4,-.4],[450,5,.5],[1100,6,0],[300,4.5,-.8],[900,5.5,.8]].forEach(([fq,q,p],i)=>{
+    const s=ac.createBufferSource();s.buffer=i%2?noiseBuf:noiseBuf2;s.loop=true;s.playbackRate.value=rr(.9,1.1);
+    const f=bp(fq,q),g=ac.createGain();g.gain.value=.5;const l=ac.createOscillator();l.frequency.value=rr(.15,.6);const lg=ac.createGain();lg.gain.value=.45;l.connect(lg);lg.connect(g.gain);l.start();
+    s.connect(f);f.connect(g);pan(g,p,crowdG);s.start(0,rr(0,1))});
+  // 2. Chœur de la tribune (« ohhh » qui enfle, clameur du but) : 12 voix, 3 formants
+  chF1=bp(480,4);chF2=bp(880,6);chF3=bp(2600,8);chG=ac.createGain();chG.gain.value=0;
+  const mix=ac.createGain(),g2=ac.createGain(),g3=ac.createGain();mix.gain.value=.09;g2.gain.value=.5;g3.gain.value=.18;
+  mix.connect(chF1);chF1.connect(chG);mix.connect(chF2);chF2.connect(g2);g2.connect(chG);mix.connect(chF3);chF3.connect(g3);g3.connect(chG);wide(chG,busC);
+  voices(mix,[98,110,123,131,147,165,175,196,220,247,262,294],chO);
+  const br=ac.createBufferSource();br.buffer=noiseBuf2;br.loop=true;const bg=ac.createGain();bg.gain.value=.45;br.connect(bg);bg.connect(mix);br.start();
+  // 3. Chœur des chants : même principe, mais on règle sa note et sa voyelle syllabe par syllabe
+  csF1=bp(750,5);csF2=bp(1250,7);csF3=bp(2500,8);csG=ac.createGain();csG.gain.value=0;
+  const cmix=ac.createGain(),c2=ac.createGain(),c3=ac.createGain();cmix.gain.value=.1;c2.gain.value=.5;c3.gain.value=.15;
+  cmix.connect(csF1);csF1.connect(csG);cmix.connect(csF2);csF2.connect(c2);c2.connect(csG);cmix.connect(csF3);csF3.connect(c3);c3.connect(csG);wide(csG,busC);
+  voices(cmix,[.5,.503,1,1.006,.994,1.012,.988,1.004,.996,2,2.01,.75],csO,165);
+  const cb=ac.createBufferSource();cb.buffer=noiseBuf;cb.loop=true;const cbg=ac.createGain();cbg.gain.value=.35;cb.connect(cbg);cbg.connect(cmix);cb.start();
+  clapG=ac.createGain();clapG.gain.value=1;clapG.connect(busC);
+  nextChant=ac.currentTime+rr(6,10);
 }
-let chF1=null,chF2=null,chG=null,chO=[],yeahUntil=0;
-function crowdOh(lv){   // "ohhhh" qui enfle quand le ballon approche d'un but
-  if(!chG||ac.currentTime<yeahUntil)return;const t=ac.currentTime;
-  chG.gain.setTargetAtTime(muted?0:Math.pow(lv,1.6)*.55*sk(),t,.25);
-  chF1.frequency.setTargetAtTime(480,t,.2);chF2.frequency.setTargetAtTime(880,t,.2);
-  chO.forEach(o=>o.detune.setTargetAtTime(lv*250,t,.3));
-}
-function setMute(m){muted=m;try{localStorage.setItem('pichenette-mute',m?'1':'0')}catch(_){}
-  if(master)master.gain.setTargetAtTime(m?0:.9,ac.currentTime,.05)}
-function noise(t,dur,type,freq,q,peak,att,rel,sweep){
-  const s=ac.createBufferSource();s.buffer=noiseBuf;
+let chF1=null,chF2=null,chF3=null,chG=null,chO=[],yeahUntil=0;
+let nextBeat=0,beatN=0,csF1=null,csF2=null,csF3=null,csG=null,csO=[],clapG=null,nextChant=0,chantUntil=0,chantN=0,saveAt=0;
+function noise(t,dur,type,freq,q,peak,att,rel,sweep,dest,p){
+  const s=ac.createBufferSource();s.buffer=Math.random()<.5?noiseBuf:noiseBuf2;s.loop=true;
   const f=ac.createBiquadFilter();f.type=type;f.frequency.setValueAtTime(freq,t);f.Q.value=q;
   if(sweep)for(const [dt,fq] of sweep)f.frequency.linearRampToValueAtTime(fq,t+dt);
   const g=ac.createGain();g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(peak,t+att);
   g.gain.setValueAtTime(peak,t+Math.max(att,dur-rel));g.gain.linearRampToValueAtTime(0,t+dur);
-  s.connect(f).connect(g).connect(master);s.start(t,Math.random()*(2-Math.min(dur,1.9)));s.stop(t+dur+.02);
+  s.connect(f);f.connect(g);if(p!==undefined)pan(g,p,dest||busS);else g.connect(dest||busS);s.start(t,Math.random()*1.8);s.stop(t+dur+.02);
 }
-function tone(t,type,f0,f1,dur,peak){
+function tone(t,type,f0,f1,dur,peak,dest,p){
   const o=ac.createOscillator(),g=ac.createGain();o.type=type;o.frequency.setValueAtTime(f0,t);o.frequency.exponentialRampToValueAtTime(f1,t+dur);
-  g.gain.setValueAtTime(peak,t);g.gain.exponentialRampToValueAtTime(.0008,t+dur);o.connect(g).connect(master);o.start(t);o.stop(t+dur+.02);
+  g.gain.setValueAtTime(peak,t);g.gain.exponentialRampToValueAtTime(.0008,t+dur);o.connect(g);if(p!==undefined)pan(g,p,dest||busS);else g.connect(dest||busS);o.start(t);o.stop(t+dur+.02);
 }
-const rr=(a,b)=>a+Math.random()*(b-a);
 function throttle(k,ms){const n=performance.now();if(n-(lastHit[k]||0)<ms)return true;lastHit[k]=n;return false}
+/* ---- petits bruits de tribune ---- */
+function shout(t,p,a){ // un supporter qui crie (« allez ! », « bravo ! »)
+  const o=ac.createOscillator(),f1=bp(rr(650,800),6),f2=bp(rr(1100,1400),8),g=ac.createGain(),f0=rr(170,280),d=rr(.25,.45);
+  o.type='sawtooth';o.frequency.setValueAtTime(f0,t);o.frequency.linearRampToValueAtTime(f0*1.25,t+d*.3);o.frequency.linearRampToValueAtTime(f0*.85,t+d);
+  g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(.05*a*sk(),t+.03);g.gain.linearRampToValueAtTime(0,t+d);
+  o.connect(f1);o.connect(f2);f1.connect(g);f2.connect(g);pan(g,p,busC);o.start(t);o.stop(t+d+.05);
+}
+function fanWhistle(t,p){ // sifflet aux doigts dans les tribunes
+  const o=ac.createOscillator(),g=ac.createGain(),f=rr(2400,3300),two=Math.random()<.5;o.type='sine';
+  o.frequency.setValueAtTime(f*.7,t);o.frequency.linearRampToValueAtTime(f,t+.08);
+  if(two){o.frequency.setValueAtTime(f*.8,t+.3);o.frequency.linearRampToValueAtTime(f*1.05,t+.42);o.frequency.linearRampToValueAtTime(f*.6,t+.7)}
+  const d=two?.72:rr(.3,.6);g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(.035*sk(),t+.03);
+  if(two){g.gain.setValueAtTime(.035*sk(),t+.24);g.gain.linearRampToValueAtTime(0,t+.27);g.gain.linearRampToValueAtTime(.035*sk(),t+.31)}
+  g.gain.linearRampToValueAtTime(0,t+d);o.connect(g);pan(g,p,busC);o.start(t);o.stop(t+d+.05);
+}
+function drum(t,a,hi){ // grosse caisse des ultras (hi : tom plus aigu, pour les roulements)
+  if(hi){tone(t,'sine',200,120,.18,a*.32*sk(),busC,rr(-.4,.4));noise(t,.05,'bandpass',900,1.2,a*.18*sk(),.001,.045,null,busC);return}
+  tone(t,'sine',105,46,.34,a*.55*sk(),busC,rr(-.25,.25));noise(t,.09,'lowpass',450,1,a*.35*sk(),.001,.08,null,busC);
+}
+function clap(t,n){for(let i=0;i<(n||22);i++)noise(t+rr(0,.04),.022,'bandpass',rr(1000,2800),2.2,rr(.04,.08)*sk(),.001,.02,null,clapG,rr(-.9,.9))}
+function airHorn(t){ // cornes de brume dans le virage après un but
+  for(let k=0;k<3;k++){const u=t+k*.55,d=k<2?.38:.95;
+    for(const f of [233,294,349]){const o=ac.createOscillator(),lp=ac.createBiquadFilter(),g=ac.createGain();o.type='sawtooth';o.frequency.value=f*rr(.995,1.005);
+      lp.type='lowpass';lp.frequency.value=1700;g.gain.setValueAtTime(0,u);g.gain.linearRampToValueAtTime(.022*sk(),u+.03);g.gain.setValueAtTime(.022*sk(),u+d-.06);g.gain.linearRampToValueAtTime(0,u+d);
+      o.connect(lp);lp.connect(g);pan(g,.55,busC);o.start(u);o.stop(u+d+.02)}}
+}
+/* ---- chœur de la tribune ---- */
+let peakTh=0,enc=0,chanceLv=0,chanceTeam=null;
+function missCheck(){ // l'équipe avait une vraie occasion et n'a pas marqué : la tribune crie sa déception
+  if(chanceLv<.6)return;const still=turn===chanceTeam&&(()=>{const p0=phase;phase='aim';const e=encourage();phase=p0;return e>.45})();
+  if(still)return;if(ac&&ac.currentTime>yeahUntil)crowdOhh(Math.min(1,chanceLv+.2));chanceLv=0}
+function encourage(){ // au tour suivant, l'équipe qui joue peut marquer : ballon dans le camp adverse, et d'autant plus fort qu'il est dans la zone de tir
+  if(phase!=='aim'||!ball)return 0;const dist=turn==='r'?ball.y:H-ball.y;
+  if(dist>H/2)return 0;return dist<ZONE?.6+.4*(1-dist/ZONE):.6*(1-(dist-ZONE)/(H/2-ZONE))}
+function threat(){ // risque de but, de 0 à 1 : ballon lancé vers une cage et qui va passer entre les poteaux
+  if(phase!=='moving'||!ball)return 0;let best=0;
+  for(const top of [true,false]){const dist=top?ball.y:H-ball.y,tow=top?-ball.vy:ball.vy;best=Math.max(best,Math.max(0,1-dist/420)*.45);
+    if(tow>1.5&&dist>-20){const px=ball.x+ball.vx*(Math.max(0,dist)/tow);if(Math.abs(px-W/2)<GOAL/2+30)best=Math.max(best,Math.min(1,tow/8)*Math.max(0,1-dist/650))}}
+  return best}
+function crowdOh(lv){ // « ohhhh » qui enfle quand le ballon approche d'un but
+  if(!chG||ac.currentTime<yeahUntil)return;const t=ac.currentTime;
+  chG.gain.setTargetAtTime(muted?0:Math.pow(lv,1.3)*1.05*sk(),t,.12);
+  chF1.frequency.setTargetAtTime(480,t,.2);chF2.frequency.setTargetAtTime(880,t,.2);chF3.frequency.setTargetAtTime(2500,t,.2);
+  chO.forEach(o=>o.detune.setTargetAtTime(lv*420,t,.2));
+}
+function crowdOhh(p){ // ballon sur le poteau : « OHHHH ! » de déception, qui monte puis retombe
+  if(!chG)return;const t=ac.currentTime,d=2.6,pk=(muted?0:(.9+.5*p)*sk());
+  yeahUntil=t+d;chanceLv=0;stopChant();nextChant=Math.max(nextChant,t+d+rr(5,9));
+  for(const P of [chG.gain,chF1.frequency,chF2.frequency]){P.cancelScheduledValues(t);P.setValueAtTime(P.value,t)}
+  chF1.frequency.linearRampToValueAtTime(520,t+.15);chF1.frequency.linearRampToValueAtTime(420,t+d);
+  chF2.frequency.linearRampToValueAtTime(900,t+.15);chF2.frequency.linearRampToValueAtTime(730,t+d);
+  chO.forEach(o=>{o.detune.cancelScheduledValues(t);o.detune.setValueAtTime(o.detune.value,t);o.detune.linearRampToValueAtTime(400,t+.35);o.detune.linearRampToValueAtTime(-180,t+d)});
+  chG.gain.linearRampToValueAtTime(pk,t+.3);chG.gain.setValueAtTime(pk*.85,t+d*.5);chG.gain.linearRampToValueAtTime(0,t+d);
+  noise(t+.05,d,'bandpass',600,1,.18*sk(),.3,1.4,[[.4,800],[d,450]],busC);
+  for(let i=0;i<3;i++)shout(t+rr(.2,1.2),rr(-.8,.8),.6);
+}
+function setMute(m){muted=m;try{localStorage.setItem('pichenette-mute',m?'1':'0')}catch(_){}
+  if(master)master.gain.setTargetAtTime(m?0:.95,ac.currentTime,.05)}
+/* ---- chants des supporters ---- */
+const VOW={a:[750,1250,2500],e:[430,1950,2600],o:[480,850,2450],u:[330,780,2300]};
+// [demi-tons au-dessus de la note de base, voyelle, début (s), durée (s)] ; ['x',t] claquement de mains ; ['d',t] grosse caisse
+const CHANTS=(()=>{const D=(l,k='d')=>l.map(b=>[k,b]);let a=[],b=[];
+  // 1. tambours + mains (remplace les « allez ») : boum . boum . boum-boum ×4, puis roulement et grand coup
+  for(let k=0;k<4;k++){const o=k*1.2;a.push(...D([o,o+.4,o+.8,o+1]),...D([o,o+.4,o+.8,o+1],'x'),['h',o+.6])}
+  for(let i=0;i<9;i++)a.push(['h',4.8+i*.075]);a.push(['d',5.5],['x',5.5]);
+  // 2. tac-tac-tac au rythme des tambours, toms entre les coups
+  for(const o of [0,2.2]){b.push(...D([o,o+.38,o+.76]),...D([o,o+.38,o+.76],'x'),...D([o+.19,o+.57,o+.95,o+1.14,o+1.33],'h'),['d',o+1.52],['d',o+1.71])}
+  b.push(['d',4.2],['x',4.2]);
+  return [a,b,
+  [['d',0],['x',0],['d',.5],['x',.5],['d',1],['x',1],['d',1.25],['x',1.25],['d',1.5],['x',1.5],['h',.25],['h',.75],[9,'e',1.78,.32],['d',1.78],['d',2.4],['x',2.4],['d',2.9],['x',2.9],['d',3.4],['x',3.4],['d',3.65],['x',3.65],['d',3.9],['x',3.9],['h',2.65],['h',3.15],[9,'e',4.18,.4],['d',4.18]]]})(); // boum – boum – boum-boum-boum « HÉ ! » ×2
+function sing(u,f,vw,d,v){ // une syllabe du chœur des chants
+  for(const {o,m} of csO)o.frequency.setTargetAtTime(f*m,u-.02,.015);
+  const [f1,f2,f3]=VOW[vw];csF1.frequency.setTargetAtTime(f1,u-.02,.02);csF2.frequency.setTargetAtTime(f2,u-.02,.02);csF3.frequency.setTargetAtTime(f3,u-.02,.02);
+  csG.gain.setValueAtTime(0,u);csG.gain.linearRampToValueAtTime(v,u+.05);csG.gain.setValueAtTime(v*.85,u+d*.75);csG.gain.linearRampToValueAtTime(0,u+d);
+}
+function chant(){
+  if(!csG)return 0;const t=ac.currentTime+.05,C=CHANTS[chantN++%CHANTS.length],base=rr(150,180),v=1*sk();let end=t;
+  csG.gain.cancelScheduledValues(t);csG.gain.setValueAtTime(0,t);
+  for(const s of C){
+    if(s[0]==='x'){clap(t+s[1]);end=Math.max(end,t+s[1]+.1);continue}
+    if(s[0]==='d'||s[0]==='h'){drum(t+s[1],1,s[0]==='h');end=Math.max(end,t+s[1]+.3);continue}
+    const [st,vw,s0,d]=s;sing(t+s0,base*Math.pow(2,st/12),vw,d,v);end=Math.max(end,t+s0+d);
+  }
+  chantUntil=end;return end-t;
+}
+function stopChant(){if(!csG)return;const t=ac.currentTime;csG.gain.cancelScheduledValues(t);csG.gain.setTargetAtTime(0,t,.05);
+  clapG.gain.cancelScheduledValues(t);clapG.gain.setValueAtTime(clapG.gain.value,t);clapG.gain.linearRampToValueAtTime(0,t+.08);clapG.gain.setValueAtTime(1,Math.max(t+.1,chantUntil+.05));chantUntil=0}
+function chantTick(){ // les supporters relancent un chant toutes les 12 à 25 s quand le jeu est calme ; entre deux, des cris et des sifflets isolés
+  if(!csG)return;const t=ac.currentTime;
+  if(!(phase==='aim'||phase==='moving')||celeb||goalCel){if(t>nextChant-4)nextChant=t+rr(4,8);return}
+  if(Math.random()<.015)shout(t+rr(0,.2),rr(-.9,.9),.45);
+  if(t<yeahUntil||t<chantUntil){nextBeat=0}else{ // entre deux chants, le tambour des ultras bat en continu
+    if(nextBeat<t)nextBeat=t+.3;
+    while(nextBeat<t+.5){const k=beatN++%8,hot=enc>.45,a=1+enc*.6; // occasion de but : le tambour accélère, la tribune tape dans les mains
+      drum(nextBeat,(k===0?.75:k===4?.6:.42)*a,false);if(hot)clap(nextBeat,10+enc*14);
+      if(k===6&&(hot||Math.random()<.5)){drum(nextBeat+.14,.5*a,true);drum(nextBeat+.28,.55*a,true)}
+      nextBeat+=hot?.55-.25*enc:.55}}
+  if(enc>.45&&Math.random()<.08)shout(t+rr(0,.2),rr(-.9,.9),.9);
+  if(t<nextChant||t<yeahUntil||t<chantUntil||enc>.4)return;
+  const near=Math.min(ball.y,H-ball.y);if(near<260&&phase==='moving')return;
+  nextBeat=0;nextChant=t+chant()+rr(10,20);
+}
+/* ---- hymnes : cuivres d'orchestre, timbales, cymbale, et le stade qui chante avec ---- */
+function brass(t,f,d,a,p){
+  for(const [mul,det,lvl] of [[1,-7,1],[1,0,1],[1,7,1],[.5,0,.55]]){const o=ac.createOscillator(),lp=ac.createBiquadFilter(),g=ac.createGain();
+    o.type='sawtooth';o.frequency.value=f*mul;o.detune.value=det;lp.type='lowpass';lp.Q.value=1.5;
+    lp.frequency.setValueAtTime(700,t);lp.frequency.linearRampToValueAtTime(2800,t+.05);lp.frequency.linearRampToValueAtTime(1900,t+Math.min(.3,d));
+    g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(a*lvl,t+.03);g.gain.setValueAtTime(a*lvl*.85,t+d*.85);g.gain.linearRampToValueAtTime(0,t+d);
+    o.connect(lp);lp.connect(g);pan(g,p,busA);o.start(t);o.stop(t+d+.02)}
+}
+function timpani(t,f,a){tone(t,'sine',f*1.03,f,.9,a,busA);tone(t,'sine',f*1.5,f*1.48,.4,a*.3,busA);noise(t,.05,'lowpass',380,1,a*.6,.001,.045,null,busA)}
+/* ---- les sons du jeu ---- */
 const sfx={
-  kick(v){if(!ac||throttle('k',50))return;const t=ac.currentTime,p=Math.min(1,v/14);      // "poc" du ballon
-    tone(t,'sine',120,45,.11,.55*p+.08);noise(t,.025,'bandpass',1100,1.4,.4*p+.05,.001,.02)},
-  clack(v){if(!ac||throttle('c',60))return;const t=ac.currentTime,p=Math.min(1,v/12);       // choc entre joueurs : bruit de coup de poing
-    sfx.kick(v);                                                          // même son que la frappe du ballon
-    if(v>2.5)sfx.han(v)},
-  han(v){if(!ac||throttle('h',280))return;const t=ac.currentTime,p=Math.min(1,v/10);      // bruitage "marteau sur un chou" : coup mat + craquement des feuilles
-    tone(t,'sine',75,34,.13,.7*p+.15);                                  // masse du coup
-    noise(t,.06,'lowpass',700,1,.55*p+.1,.001,.05);                     // impact mou et humide
-    for(let i=0;i<7;i++)noise(t+rr(0,.05),.012,'bandpass',rr(1200,2600),1.5,(.3*p+.08)*rr(.5,1),.001,.01)}, // craquements
-  board(v){if(!ac||v<.8||throttle('b',80))return;const t=ac.currentTime,p=Math.min(1,v/10);  // panneaux
-    noise(t,.1,'lowpass',380,1,.4*p,.003,.08)},
-  post(){if(!ac||throttle('p',300))return;const t=ac.currentTime;                            // poteau puis "ooh"
-    noise(t,.015,'bandpass',1800,1.2,.3,.001,.012);                    // attaque du métal
-    for(const [f,a,d] of [[210,.32,1.8],[214,.2,1.7],[540,.16,1.3],[745,.1,1],[1010,.06,.7]])tone(t,'sine',f,f*.997,d,a); // poteau creux, grave : "booong"
-    noise(t+.15,1.3,'bandpass',380,2,.26,.3,.8,[[.6,620],[1.3,330]])},
-  applause(){if(!ac)return;const t=ac.currentTime,d=3.6;                                   // applaudissements nourris
-    noise(t,d,'bandpass',1800,.8,.12*sk(),.4,1.4);
-    for(let i=0;i<Math.round(40+60*stake);i++){const u=Math.random();noise(t+Math.pow(u,.7)*d,.025,'bandpass',rr(1200,3200),2.5,rr(.05,.11)*(1-u*.6),.002,.02)}},
-  net(){if(!ac||throttle('n',250))return;noise(ac.currentTime,.3,'highpass',2200,.5,.1,.01,.25)},
-  roar(big){if(!ac)return;const t=ac.currentTime,d=big?4:3.2;                              // "YEAAAAAHHHH !"
-    yeahUntil=t+d;chG.gain.cancelScheduledValues(t);chF1.frequency.cancelScheduledValues(t);chF2.frequency.cancelScheduledValues(t);
-    chF1.frequency.setValueAtTime(380,t);chF2.frequency.setValueAtTime(2100,t);           // "yé…"
-    chF1.frequency.linearRampToValueAtTime(760,t+.7);chF2.frequency.linearRampToValueAtTime(1250,t+.7); // "…aaaah"
+  kick(v){if(!ac||throttle('k',45))return;const t=ac.currentTime,p=Math.min(1,v/14);   // frappe : « poc » sourd du cuir + claquement
+    tone(t,'sine',150,48,.12,.7*p+.1);noise(t,.008,'highpass',3500,.7,.35*p+.05,.0005,.007);noise(t,.04,'bandpass',900,1.2,.3*p+.04,.001,.035)},
+  clack(v){if(!ac||throttle('c',60))return;                                            // choc entre joueurs : même son que la frappe du ballon
+    sfx.kick(v);if(v>2.5)sfx.han(v)},
+  han(v){if(!ac||throttle('h',280))return;const t=ac.currentTime,p=Math.min(1,v/10);   // « marteau sur un chou » : coup mat + craquement des feuilles
+    tone(t,'sine',75,34,.13,.7*p+.15);noise(t,.06,'lowpass',700,1,.55*p+.1,.001,.05);
+    for(let i=0;i<7;i++)noise(t+rr(0,.05),.012,'bandpass',rr(1200,2600),1.5,(.3*p+.08)*rr(.5,1),.001,.01)},
+  board(v){if(!ac||v<.8||throttle('b',80))return;const t=ac.currentTime,p=Math.min(1,v/10); // panneau publicitaire : coup sourd sur une planche
+    noise(t,.12,'lowpass',320,1,.45*p,.003,.1);tone(t,'triangle',190,140,.09,.18*p)},
+  post(v){if(!ac||throttle('p',300))return;const t=ac.currentTime,p=Math.min(1,(v||5)/8);  // poteau : « clong » métallique puis « ohhhh ! » de la tribune
+    if(v>1.5&&phase==='moving')crowdOhh(p);
+    noise(t,.012,'bandpass',2400,1,.35*p+.1,.0005,.01);
+    for(const [r,a,d] of [[1,.3,1.7],[2.76,.16,1.1],[5.4,.09,.7],[8.93,.05,.4]])tone(t,'sine',290*r,290*r*.998,d,a*(.5+.5*p),busW)},
+  applause(short){if(!ac)return;const t=ac.currentTime,d=short?2.8:4,n=Math.round((short?.7:1)*(80+100*stake)); // applaudissements nourris, tout autour
+    noise(t,d,'bandpass',2200,.6,.2*sk(),.35,1.6,null,busC,-.4);noise(t,d,'bandpass',1700,.6,.2*sk(),.4,1.5,null,busC,.4);
+    for(let i=0;i<n;i++){const u=Math.random();noise(t+Math.pow(u,.8)*d,.02,'bandpass',rr(1000,3400),2.2,rr(.08,.16)*(1-u*.6)*sk(),.001,.018,null,busC,rr(-.9,.9))}
+    for(let i=0;i<(short?3:6);i++)shout(t+rr(.1,d*.6),rr(-.8,.8),.55);},
+  net(){if(!ac||throttle('n',250))return;const t=ac.currentTime;                             // le filet qui tremble
+    noise(t,.4,'bandpass',4200,.8,.14,.01,.32,[[.4,1400]]);noise(t,.2,'lowpass',600,1,.08,.01,.15)},
+  roar(big){if(!ac)return;const t=ac.currentTime,d=big?5:4.2;                              // « YEAAAAAHHHH ! » + cornes, sifflets, tambours
+    yeahUntil=t+d;stopChant();nextChant=t+d+rr(1.5,3);                                    // puis les supporters enchaînent vite sur un chant
+    for(const P of [chG.gain,chF1.frequency,chF2.frequency,chF3.frequency])P.cancelScheduledValues(t);
+    chF1.frequency.setValueAtTime(380,t);chF2.frequency.setValueAtTime(2100,t);chF3.frequency.setValueAtTime(2900,t);  // « yé… »
+    chF1.frequency.linearRampToValueAtTime(760,t+.7);chF2.frequency.linearRampToValueAtTime(1250,t+.7);chF3.frequency.linearRampToValueAtTime(2500,t+.7); // « …aaaah »
     chF1.frequency.linearRampToValueAtTime(680,t+d);chF2.frequency.linearRampToValueAtTime(1100,t+d);
-    chO.forEach(o=>{o.detune.cancelScheduledValues(t);o.detune.setValueAtTime(o.detune.value,t);o.detune.linearRampToValueAtTime(420,t+.5);o.detune.linearRampToValueAtTime(150,t+d)});
-    chG.gain.setValueAtTime(chG.gain.value,t);chG.gain.linearRampToValueAtTime(muted?0:(big?1.1:.9)*sk(),t+.3);chG.gain.setValueAtTime(muted?0:(big?1:.8)*sk(),t+d*.55);chG.gain.linearRampToValueAtTime(0,t+d);
-    noise(t,d,'bandpass',800,.9,big?.45:.35,.25,1.6,[[.5,1100],[d,700]]);
-    for(let i=0;i<12;i++)noise(t+rr(.6,d),.03,'bandpass',rr(1500,2800),3,.08,.002,.025)},
-  whistle(kind){if(!ac)return;let t=ac.currentTime+.05;                                       // sifflet d'arbitre
-    for(const d of kind==='end'?[.4,.4,1]:kind==='half'?[.45,.75]:[.3]){
-      const o=ac.createOscillator(),am=ac.createOscillator(),amg=ac.createGain(),g=ac.createGain(),env=ac.createGain();
-      o.frequency.value=3000;am.frequency.value=28;amg.gain.value=.4;am.connect(amg).connect(g.gain);
-      env.gain.setValueAtTime(0,t);env.gain.linearRampToValueAtTime(.12,t+.015);env.gain.setValueAtTime(.12,t+d-.05);env.gain.linearRampToValueAtTime(0,t+d);
-      g.gain.value=.6;o.connect(g).connect(env).connect(master);o.start(t);am.start(t);o.stop(t+d+.02);am.stop(t+d+.02);t+=d+.15;
+    chO.forEach(o=>{o.detune.cancelScheduledValues(t);o.detune.setValueAtTime(o.detune.value,t);o.detune.linearRampToValueAtTime(450,t+.5);o.detune.linearRampToValueAtTime(150,t+d)});
+    chG.gain.setValueAtTime(chG.gain.value,t);chG.gain.linearRampToValueAtTime(muted?0:(big?1.3:1.1)*sk(),t+.3);chG.gain.setValueAtTime(muted?0:(big?1.15:.95)*sk(),t+d*.55);chG.gain.linearRampToValueAtTime(0,t+d);
+    noise(t,d,'bandpass',800,.9,big?.4:.32,.25,1.8,[[.5,1100],[d,700]],busC,-.5);noise(t,d,'bandpass',950,.9,big?.4:.32,.3,1.8,[[.5,1200],[d,750]],busC,.5);
+    for(let i=0;i<6;i++)shout(t+rr(.4,d*.7),rr(-.9,.9),.8);
+    airHorn(t+.6);for(let i=0;i<10;i++)drum(t+1.3+i*.32,i%4===3?1.2:.9)},
+  whistle(kind){if(!ac)return;let t=ac.currentTime+.05;                                       // sifflet d'arbitre à bille : trille irrégulière + souffle
+    for(const d of kind==='end'?[.38,.38,1.3]:kind==='half'?[.4,.9]:[.55]){
+      const o=ac.createOscillator(),o2=ac.createOscillator(),o2g=ac.createGain(),fm=ac.createOscillator(),fmg=ac.createGain(),amg=ac.createGain(),am=ac.createGain(),env=ac.createGain();
+      o.frequency.value=2900;o2.frequency.value=5810;o2g.gain.value=.12;fm.type='square';fm.frequency.value=rr(34,42);fmg.gain.value=140;amg.gain.value=.25;
+      fm.connect(fmg);fmg.connect(o.frequency);fmg.connect(o2.frequency);fm.connect(amg);am.gain.value=.75;amg.connect(am.gain);
+      env.gain.setValueAtTime(0,t);env.gain.linearRampToValueAtTime(.2,t+.02);env.gain.linearRampToValueAtTime(.15,t+.07);env.gain.setValueAtTime(.15,t+d-.06);env.gain.linearRampToValueAtTime(0,t+d);
+      o.connect(am);o2.connect(o2g);o2g.connect(am);am.connect(env);env.connect(busW);
+      for(const n of [o,o2,fm]){n.start(t);n.stop(t+d+.02)}
+      noise(t,d,'bandpass',3200,3,.035,.02,.06,null,busW);t+=d+.13;
     }},
-  boom(){if(!ac)return;const t=ac.currentTime;                                                // feu d'artifice : détonation sourde puis crépitement
-    tone(t,'sine',95,38,.5,.45);noise(t,.35,'lowpass',500,1,.35,.005,.3);
-    for(let i=0;i<16;i++)noise(t+.12+Math.random()*.7,.015,'bandpass',rr(2200,4200),2,rr(.04,.09),.001,.012)},
-  anthem(name){if(!ac)return; // dernier morceau de phrase de l'hymne de l'équipe qui reçoit, jouées par des cuivres
-    const M=ANTHEMS[name]||ANTHEMS._fanfare,beat=.27;let t=ac.currentTime+.05;
-    for(const [n,b] of M){const f=440*Math.pow(2,(n-69)/12),d=b*beat;
-      for(const [type,mul,a] of [['sawtooth',1,.11],['square',.5,.05]]){
-        const o=ac.createOscillator(),lp=ac.createBiquadFilter(),g=ac.createGain();o.type=type;o.frequency.value=f*mul;
-        lp.type='lowpass';lp.frequency.setValueAtTime(900,t);lp.frequency.linearRampToValueAtTime(2200,t+.06);
-        g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(a*sk(),t+.03);g.gain.setValueAtTime(a*sk(),t+d*.8);g.gain.linearRampToValueAtTime(0,t+d*.98);
-        o.connect(lp).connect(g).connect(master);o.start(t);o.stop(t+d)}
-      t+=d}},
-  tick(v){if(!ac)return;tone(ac.currentTime,'square',v>8?1400:900,v>8?1400:900,.04,.04)}
+  launch(){if(!ac||throttle('fl',120))return;const t=ac.currentTime,p=rr(-.8,.8);          // départ d'une fusée : « fssshhh » qui monte
+    noise(t,.65,'bandpass',900,1.5,.12,.04,.25,[[.6,3200]],busC,p)},
+  boom(){if(!ac)return;const t=ac.currentTime,p=rr(-.7,.7);                                 // feu d'artifice : détonation qui claque (audible même sur le haut-parleur de l'iPhone) puis crépitements
+    noise(t,.05,'bandpass',1400,.5,.7,.001,.045,null,busC,p);                                 // le « PAN » sec
+    tone(t,'sine',140,45,.6,.55,busC);tone(t,'triangle',320,90,.25,.25,busC,p);noise(t,.6,'lowpass',900,.8,.4,.003,.5,null,busC,p);
+    for(let i=0;i<32;i++){const u=t+.25+Math.pow(Math.random(),.7)*1.6;noise(u,.014,'bandpass',rr(1800,4500),1.8,rr(.08,.18)*(1-(u-t)/2.2),.001,.012,null,busC,p+rr(-.3,.3))}},
+  anthem(name){if(!ac)return; // fin de l'hymne de l'équipe qui reçoit : cuivres, timbales, cymbale, et la tribune qui chante
+    const M=ANTHEMS[name];if(!M)return;const beat=.33,v=sk(),t0=ac.currentTime+.05,last=M[M.length-1][0];
+    const total=M.reduce((s,[,b])=>s+b,0)*beat,ring=1.6;
+    for(let i=0;i<12;i++)timpani(t0+i*.05,mf(last-24),(.03+.1*i/12)*v);                      // roulement de timbales
+    for(const [n,a] of [[last-24,.05],[last-12,.035]]){const o=ac.createOscillator(),lp=ac.createBiquadFilter(),g=ac.createGain(); // nappe grave des cordes et trombones
+      o.type='sawtooth';o.frequency.value=mf(n);lp.type='lowpass';lp.frequency.value=650;g.gain.setValueAtTime(0,t0);g.gain.linearRampToValueAtTime(a*v,t0+total);g.gain.linearRampToValueAtTime(0,t0+total+ring);
+      o.connect(lp);lp.connect(g);g.connect(busA);o.start(t0);o.stop(t0+total+ring+.05)}
+    let t=t0;csG.gain.cancelScheduledValues(t);
+    M.forEach(([n,b],i)=>{const f=mf(n),fin=i===M.length-1,d=fin?b*beat+ring:b*beat;
+      brass(t,f,d,.05*v,0);brass(t,f*2,d,.012*v,rr(-.3,.3));                                  // mélodie aux cuivres, doublée à l'octave
+      sing(t,f/2,'a',d*.95,.45*v);                                                           // le stade chante avec, une octave plus bas
+      if(fin){for(const [st,p] of [[4,-.5],[7,.5],[-12,0]])brass(t,mf(n+st),d,.035*v,p);        // accord final
+        timpani(t,mf(last-24),.25*v);noise(t,2.6,'highpass',5500,.7,.09*v,.004,2.5,null,busA,.2)} // coup de timbale + cymbale
+      t+=b*beat});
+    chantUntil=t+ring},
+  tick(v){if(!ac)return;const t=ac.currentTime;tone(t,'triangle',v>8?1500:1000,v>8?1500:1000,.035,.05);tone(t,'sine',v>8?3000:2000,v>8?3000:2000,.015,.015)}
 };
 function rainSound(on){if(rainG)rainG.gain.setTargetAtTime(0,ac.currentTime,.1)} // plus de bruit de pluie
-function crowdLevel(x){if(crowdG)crowdG.gain.setTargetAtTime(muted?0:x*1.3*sk(),ac.currentTime,.4)}
+function crowdLevel(x){if(crowdG)crowdG.gain.setTargetAtTime(muted?0:x*3.5*sk(),ac.currentTime,.4)}
 /* ---------- Physique ---------- */
 const posts=[{x:W/2-GOAL/2,y:0},{x:W/2+GOAL/2,y:0},{x:W/2-GOAL/2,y:H},{x:W/2+GOAL/2,y:H}];
 function bodies(){return [...discs,ball]}
@@ -426,7 +579,7 @@ function walls(b){
     for(const p of posts){
       const dx=b.x-p.x,dy=b.y-p.y,d=Math.hypot(dx,dy),min=b.r+4;
       if(d<min&&d>0){const nx=dx/d,ny=dy/d;b.x=p.x+nx*min;b.y=p.y+ny*min;
-        const vn=b.vx*nx+b.vy*ny; if(vn<0){b.vx-=1.8*vn*nx;b.vy-=1.8*vn*ny;sfx.post()}}
+        const vn=b.vx*nx+b.vy*ny; if(vn<0){b.vx-=1.8*vn*nx;b.vy-=1.8*vn*ny;sfx.post(-vn)}}
     }
   }
 }
@@ -436,6 +589,8 @@ function collide(a,b){
   const nx=dx/d,ny=dy/d,ov=min-d,tm=a.m+b.m;
   a.x-=nx*ov*b.m/tm;a.y-=ny*ov*b.m/tm;b.x+=nx*ov*a.m/tm;b.y+=ny*ov*a.m/tm;
   const rv=(b.vx-a.vx)*nx+(b.vy-a.vy)*ny; if(rv>0)return;
+  if(phase==='moving'&&(a.ball||b.ball)){const bl=a.ball?a:b,k=a.ball?b:a; // tir sur le gardien adverse : le ballon fonçait vers sa cage
+    if(k.gk&&k.team!==turn&&(k.team==='b'?-bl.vy:bl.vy)>4)saveAt=performance.now()}
   const hitter=a.ball?b:b.ball?a:(Math.hypot(a.vx,a.vy)>=Math.hypot(b.vx,b.vy)?a:b); // le joueur qui frappe
   const j=-(1+.88)*rv/(1/a.m+1/b.m);
   a.vx-=j*nx/a.m;a.vy-=j*ny/a.m;b.vx+=j*nx/b.m;b.vy+=j*ny/b.m;
@@ -477,9 +632,9 @@ function showTurn(){ // bandeau bien visible à chaque changement d'équipe
   el.style.borderColor=sd.main;el.hidden=false;el.style.animation='none';void el.offsetWidth;el.style.animation='';
   clearTimeout(turnTimer);turnTimer=setTimeout(()=>{el.hidden=true},1300);
 }
-function setAim(){if(flicks===1&&ball)possPos={x:ball.x,y:ball.y};goalRoll=false;phase='aim';turnT=0;aim=null;if(turn!==shownTurn){shownTurn=turn;showTurn()}ui();maybeCpu()}
+function setAim(){missCheck();if(flicks===1&&ball)possPos={x:ball.x,y:ball.y};goalRoll=false;phase='aim';turnT=0;aim=null;if(turn!==shownTurn){shownTurn=turn;showTurn()}ui();maybeCpu()}
 function inZone(d){return d.team==='r'?d.y<ZONE:d.y>H-ZONE}
-function shoot(d,vx,vy){lastShot=d;d.vx=vx;d.vy=vy;shooter=d.team;shotZone=inZone(d);phase='moving';lastTouch=null;oppTouch=false;sixShot=sixFresh&&d.gk;sixTurn=sixShot;sixFresh=false;kickShot=kickFresh;kickTouched=false;kickFoul=false;kickFresh=false;ui()}
+function shoot(d,vx,vy){const ch=encourage();if(ch>chanceLv||turn!==chanceTeam){chanceLv=ch;chanceTeam=turn}lastShot=d;d.vx=vx;d.vy=vy;shooter=d.team;shotZone=inZone(d);phase='moving';lastTouch=null;oppTouch=false;sixShot=sixFresh&&d.gk;sixTurn=sixShot;sixFresh=false;kickShot=kickFresh;kickTouched=false;kickFoul=false;kickFresh=false;ui()}
 function timeUp(){
   if(kickFresh){kickoff=turn==='r'?'b':'r';reset();banner('TEMPS ÉCOULÉ','Engagement pour l’adversaire',1300);setAim();return}
   if(endPossession(turn))return;
@@ -489,7 +644,7 @@ function checkGoal(team){
   goal(team);
 }
 function offZone(team){
-  phase='goal';const def=team==='r'?'b':'r';
+  phase='goal';saveAt=0;chanceLv=0;const def=team==='r'?'b':'r';
   banner('BUT REFUSÉ','Tir hors de la zone de tir');ui();
   setTimeout(()=>{
     $('banner').hidden=true;
@@ -567,6 +722,8 @@ function sixMeters(title){ // l'arbitre siffle un renvoi aux 6 mètres pour l'é
   },1600);
 }
 function goal(team){
+  peakTh=0;chanceLv=0;
+  saveAt=0; // le ballon est rentré malgré le gardien : pas d'applaudissements, la clameur du but
   sfx.roar(!!(match&&match.golden));
   score[team]++;phase='goal';goalRoll=true;
   const mine=discs.filter(d=>d.team===team);
@@ -766,7 +923,7 @@ function animStep(){
     const s=S[celeb.team],a=Math.random()*Math.PI*2,c=Math.cos(a),sn=Math.sin(a),R0=ROOF;
     const x0=W/2+R0.A*Math.sign(c)*Math.pow(Math.abs(c),2/R0.N),y0=H/2+R0.B*Math.sign(sn)*Math.pow(Math.abs(sn),2/R0.N);
     const pal=[['#e0b54a','#fff3c4'],[s.main,s.main],[s.sec,s.sec],['#f2efe4','#ffffff']][(Math.random()*4)|0];
-    fireworks.push({x0,y0,x:x0,y:y0,tx:60+Math.random()*(W-120),ty:90+Math.random()*(H-180),t:0,dur:38+Math.random()*22,pal,two:Math.random()<.35?s.sec:null});
+    sfx.launch();fireworks.push({x0,y0,x:x0,y:y0,tx:60+Math.random()*(W-120),ty:90+Math.random()*(H-180),t:0,dur:38+Math.random()*22,pal,two:Math.random()<.35?s.sec:null});
   }
   for(const f of fireworks){
     f.t++;const k=Math.min(1,f.t/f.dur),e=1-Math.pow(1-k,2.2);f.x=f.x0+(f.tx-f.x0)*e;f.y=f.y0+(f.ty-f.y0)*e;
@@ -1035,10 +1192,10 @@ const ANTHEMS={ // dernier morceau de phrase de chaque hymne
   'Allemagne':[[65,1],[67,.5],[68,.5],[70,.5],[72,.5],[68,.5],[65,.5],[63,1],[67,.5],[65,.5],[63,2]], // Haydn (1797) : « blü-he deut-sches Va-ter-land »
   'Angleterre':[[76,.5],[72,.5],[71,1],[69,1],[67,2]], // God Save the King (XVIIIe s.) : « God save the King »
   'États-Unis':[[62,1],[63,.5],[60,.5],[58,2]],        // The Star-Spangled Banner : « …of the brave »
-  _fanfare:[[67,.75],[64,.25],[62,1],[60,2]]           // fanfare générique : cadence finale, qui descend et se pose sur la note la plus grave
 };
 const IN_ANTHEM=210,IN_END=300; // images à 60 par seconde : 300 = 5 s
 function startIntro(){
+  tifoUp=true;tifoFold=0;
   phase='intro';aim=null;
   const home=discs.map(d=>({x:d.x,y:d.y})),idx={r:0,b:0};
   intro={t:0,ps:discs.map((d,k)=>{const i=idx[d.team]++,e=d.gk?4:i-1,s=d.team==='r'?1:-1,bl=d.team==='b'?1:0;
@@ -1058,7 +1215,7 @@ function introStep(){
     d.x=a.x+(b.x-a.x)*p;d.y=a.y+(b.y-a.y)*p});
   if(t===160)sfx.anthem(S.r.name); // tout le monde est aligné : hymne de l'équipe qui reçoit
   if(t===IN_ANTHEM){ball.x=W/2;ball.y=H/2}
-  if(t>=IN_END){intro=null;discs.forEach(d=>d.hid=false);reset();setAim();sfx.whistle('kick')}
+  if(t>=IN_END){tifoFold=performance.now();intro=null;discs.forEach(d=>d.hid=false);reset();setAim();sfx.whistle('kick')}
 }
 function begin(noIntro){
   stake=computeStake();roofStyle=ROOFS[(Math.random()*ROOFS.length)|0];
@@ -1068,7 +1225,7 @@ function begin(noIntro){
   rainSound(wx.rain);
   score={r:0,b:0};kickoff=hb()?'b':'r';goalCel=null;celeb=null;confetti=[];fireworks=[];sparks=[];lastDisc=null;paused=null;clearLive();flip=false;
   match=Object.assign(match||{ko:false},{half:1,left:HALF_MS,golden:false});lastSecClock=-1;
-  shownTurn=null;intro=null;reset();$('menu').hidden=true;$('banner').hidden=true;if(noIntro){setAim();sfx.whistle('kick')}else startIntro();
+  shownTurn=null;intro=null;tifoUp=false;reset();$('menu').hidden=true;$('banner').hidden=true;if(noIntro){setAim();sfx.whistle('kick')}else startIntro();
 }
 
 /* ---------- Panneaux ---------- */
@@ -1181,8 +1338,11 @@ function showOver(team){
 card.addEventListener('click',e=>{
   initAudio();
   const b=e.target.closest('[data-act]');if(!b)return;const a=b.dataset.act;
+  // un match de Mondial / Champ League en pause : « Reprendre le Mondial » ou « Jouer le match » le reprend là où il s'était arrêté, au lieu de le relancer à 0
+  const liveOf=paused&&match&&((a==='cup'||a==='play')&&(mode==='cup'||mode==='cup-hub')&&cup||(a==='cl'||a==='clplay')&&(mode==='cl'||mode==='cl-hub')&&cl);
+  if(liveOf){mode=a==='cup'||a==='play'?'cup':'cl';resumeMatch();return}
   if(a==='home')showHome();
-  else if(a==='resume'){phase=paused;paused=null;$('menu').hidden=true;turnT=0;ui();maybeCpu()}
+  else if(a==='resume')resumeMatch();
   else if(a==='cup'){paused=null;clearLive();cup&&cup.stage!=='done'&&!cup.out?(mode='cup-hub',showHub()):showPicker()}
   else if(a==='pick'){DEF_NAT=+b.dataset.t;savePick('touchfc-pick-nat',DEF_NAT);newCup(DEF_NAT)}
   else if(a==='hub')showHub();
@@ -1196,6 +1356,7 @@ card.addEventListener('click',e=>{
   else if(a==='clnew'){cl=null;saveCl();clPicker()}
   else if(a==='cpu'||a==='duo'){mode=a==='cpu'?'friendly':'duo';cpu=a==='cpu';randomTeams();match={ko:false};begin()}
 });
+function resumeMatch(){phase=paused;paused=null;$('menu').hidden=true;turnT=0;ui();maybeCpu()}
 function openMenu(){
   if(phase==='aim'||phase==='moving'){paused=phase;phase='menu';aim=null}
   if(phase==='over'||phase==='goal'||phase==='intro')return;
@@ -1295,6 +1456,30 @@ for(const end of ['b','r'])for(let x=-M+28;x<W+M-10;x+=78){
   flags.push({x:x+(end==='b'?0:39)%78,y:end==='b'?-AP-6-30:H+AP+6+30,end,ph:x*.07,k:((x*37)%100)/100});
 }
 const NEUTRAL=['#d9d4c7','#3a3f45','#8a8f96','#1c2026'];
+/* Tifos : 3 grandes bâches tenues par les supporters dans chaque virage (rayures, nom de l'équipe, drapeau), aux couleurs de l'équipe de ce virage */
+const TIFOS=[];
+for(const end of ['b','r'])for(const [x0,x1,y0,y1,kind] of [[0,175,-76,-36,'stripes'],[200,400,-76,-52,'name'],[425,600,-76,-36,'flag']]){
+  const top=end==='b';TIFOS.push({end,kind,x0,x1,y0:top?y0:H-y1,y1:top?y1:H-y0})}
+let tifoUp=false,tifoFold=0; // tifos déployés pendant l'entrée des joueurs, repliés à l'engagement
+function drawTifos(t,hype,k){
+  for(const T0 of TIFOS){
+    const sd=S[T0.end],w=T0.x1-T0.x0,h=T0.y1-T0.y0,cx=(T0.x0+T0.x1)/2,top=T0.end==='b',hh=h*k,cy=top?T0.y0+hh/2:T0.y1-hh/2; // se replie vers le haut des tribunes
+    const key=sd.main+sd.sec+sd.name+sd.flag,q=3;if(T0.key!==key){T0.key=key;T0.c=document.createElement('canvas');T0.c.width=w*q;T0.c.height=h*q;
+    const c=T0.c,g=c.getContext('2d');g.scale(q,q);
+    g.fillStyle=sd.main;g.fillRect(0,0,w,h);
+    if(T0.kind==='stripes'){g.fillStyle=sd.sec;g.save();g.beginPath();g.rect(0,0,w,h);g.clip();for(let x=-h;x<w+h;x+=22){g.beginPath();g.moveTo(x,h);g.lineTo(x+11,h);g.lineTo(x+11+h,0);g.lineTo(x+h,0);g.fill()}g.restore()}
+    else if(T0.kind==='name'){g.fillStyle=sd.sec;g.textAlign='center';g.textBaseline='middle';let fs=18;g.font=`800 ${fs}px "Saira Extra Condensed","Arial Narrow",sans-serif`;
+      const txt=sd.name.toUpperCase();while(fs>8&&g.measureText(txt).width>w-12){fs--;g.font=`800 ${fs}px "Saira Extra Condensed","Arial Narrow",sans-serif`}g.fillText(txt,w/2,h/2+1)}
+    else{g.fillStyle=sd.sec;g.fillRect(0,0,w,5);g.fillRect(0,h-5,w,5);g.textAlign='center';g.textBaseline='middle';
+      if(sd.flag){g.font=`${h*.62}px system-ui,"Apple Color Emoji","Segoe UI Emoji",sans-serif`;g.fillText(sd.flag,w/2,h/2+1)}
+      else{g.beginPath();g.arc(w/2,h/2,h*.32,0,7);g.fill();g.fillStyle=sd.main;g.font=`800 ${h*.36}px "Saira Extra Condensed","Arial Narrow",sans-serif`;g.fillText(sd.name.slice(0,1).toUpperCase(),w/2,h/2+1)}}
+    g.strokeStyle=sd.sec;g.lineWidth=2;g.strokeRect(1,1,w-2,h-2)}const c=T0.c;
+    ctx.save();ctx.translate(cx,cy);if(flip)ctx.rotate(Math.PI);
+    for(let x=0;x<w;x+=6){const j=hype?Math.sin(t/110+(T0.x0+x)*.06)*2.2:0,sh=hype?.9+.1*Math.sin(t/110+(T0.x0+x)*.06):1; // pendant un but, la bâche ondule
+      ctx.globalAlpha=sh;ctx.drawImage(c,x*q,0,Math.min(6,w-x)*q,h*q,-w/2+x,-hh/2+j*k,Math.min(6,w-x)+.4,hh)}
+    ctx.globalAlpha=1;ctx.restore();
+  }
+}
 function drawCrowd(t,hype){
   const seen=.3+.7*stake; // part des places occupées : ~48 % en amical, stade plein en finale
   for(const p of crowd){
@@ -1308,6 +1493,7 @@ function drawCrowd(t,hype){
   ctx.textAlign='center';ctx.textBaseline='middle';ctx.font='16px system-ui,"Apple Color Emoji","Segoe UI Emoji",sans-serif';
   for(const f of flags){
     if(f.k>stake)continue; // plus de drapeaux quand l'enjeu monte
+    if(TIFOS.some(T0=>f.x>T0.x0-8&&f.x<T0.x1+8))continue; // pas de drapeau devant les tifos
     const sd=S[f.end],a=hype?Math.sin(t/160+f.ph)*.35:Math.sin(f.ph)*.12,top=f.end==='b'&&!flip||f.end==='r'&&flip;
     ctx.save();ctx.translate(f.x,f.y);ctx.rotate(a+(flip?Math.PI:0));
     ctx.strokeStyle='#d9d4c7';ctx.lineWidth=1.4;ctx.beginPath();ctx.moveTo(0,8);ctx.lineTo(0,-12);ctx.stroke();
@@ -1329,6 +1515,7 @@ function pitch(t){
   if(key!==bgKey){bgKey=key;bgA=bakeBg(false);bgB=bakeBg(true)}
   ctx.save();ctx.setTransform(1,0,0,1,0,0);ctx.drawImage(hype?bgA:bgB,0,0);ctx.restore();
   if(hype){fieldT(flip);drawCrowd(t,true);fieldT(false)}
+  if(tifoUp){const p=tifoFold?(performance.now()-tifoFold)/900:0;if(p>=1)tifoUp=false;else{fieldT(flip);drawTifos(t,true,p?Math.pow(1-p,1.5):1);fieldT(false)}}
   nets();
 }
 function staticPitch(withCrowd){
@@ -1636,14 +1823,20 @@ function loop(t){
       if(turnT>=TURN_MS)timeUp();
     }
     if(celeb)animStep();
-    if(crowdG&&((frameN=(frameN||0)+1)%15===0)){
-      let lv=.05;
-      if(phase==='menu')lv=.025;
-      else if(phase==='goal'||celeb)lv=.12;
-      else{const near=Math.min(ball.y,H-ball.y);lv=.05+(phase==='moving'?.08:.03)*Math.max(0,1-near/320)} // la tribune monte quand le ballon approche d'un but
+    if(crowdG&&((frameN=(frameN||0)+1)%5===0)){
+      const th=threat(),near=Math.min(ball.y,H-ball.y),late=match&&match.half===2&&match.left<15000?.03:0;
+      let lv=.08+late;
+      if(phase==='menu')lv=.03;
+      else if(phase==='goal'||celeb)lv=.2;
+      else if(phase==='intro')lv=.16;
+      else lv+=(phase==='moving'?.05:.02)*Math.max(0,1-near/320)+th*.22+enc*.2; // la tribune gronde quand le ballon approche d'un but, et explose sur un tir cadré
       crowdLevel(lv);
-      const near=Math.min(ball.y,H-ball.y)-(Math.abs(ball.x-W/2)>GOAL?60:0);
-      crowdOh(phase==='moving'?Math.max(0,1-near/380):phase==='aim'?Math.max(0,1-near/300)*.35:0);
+      enc=encourage();crowdOh(phase==='moving'?th:phase==='aim'?Math.max(Math.max(0,1-near/300)*.3,enc*.75):0);
+      if(phase==='moving'){peakTh=Math.max(peakTh,th);
+        if(peakTh>.5&&th<.12){if(ac.currentTime>yeahUntil)crowdOhh(peakTh);peakTh=0}} // l'occasion est passée : « ohhhh ! »
+      else if(phase!=='goal')peakTh=0;
+      if(saveAt&&performance.now()-saveAt>600){saveAt=0;if(phase==='aim'||phase==='moving'){stopChant();sfx.applause(true);nextChant=Math.max(nextChant,ac.currentTime+rr(5,9))}} // arrêt du gardien : le public applaudit
+      chantTick();
     }
     acc-=1000/60;
   }
@@ -1655,7 +1848,8 @@ const LIVE_KEY='touchfc-live-v1';
 function saveLive(){
   try{
     const ph=phase==='aim'||phase==='moving'?phase:paused;
-    if(!ph||!match){localStorage.removeItem(LIVE_KEY);return}
+    if(!match){localStorage.removeItem(LIVE_KEY);return}
+    if(!ph)return; // but, mi-temps, coup d'envoi en cours : on garde la dernière sauvegarde au lieu d'effacer le match
     localStorage.setItem(LIVE_KEY,JSON.stringify({ph,discs,ball,score,turn,flicks,maxFlicks,kickoff,lastTouch,lastScorer,
       sixTurn,sixFresh,sixShot,kickShot,kickTouched,kickFoul,kickFresh,shotZone,shooter,lineRun,lineEnd,stuckRun,possPos,oppTouch,
       lastShot:discs.indexOf(lastShot),match,mode,cpu,S,flip,wx,stake,roofStyle,ballStyle,t:Date.now()}));
